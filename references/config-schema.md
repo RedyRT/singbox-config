@@ -3,6 +3,21 @@
 > Authoritative docs: https://sing-box.sagernet.org/configuration/
 > When in doubt about a field, fetch the latest docs with WebFetch.
 
+## Version Matrix
+
+| Field / behavior | v1.13 template | v1.14 template |
+|------------------|----------------|----------------|
+| Default template status | Current default as of 2026-07-01 | Optional target |
+| DNS cache isolation | `independent_cache: true` allowed | Do not use; deprecated because cache keys by transport |
+| DNS persistent cache | `cache_file.store_rdrc` for rejected DNS response cache | `cache_file.store_dns` for DNS cache persistence |
+| DNS optimistic cache | Not used | `dns.optimistic` available |
+| RealIP domain recovery | Use `dns.reverse_mapping: true` when domain rules need IP-to-domain recovery | Same |
+| Hosts fallback | `ip_accept_any` response filter | Prefer `preferred_by: "hosts"` DNS rule item |
+| Remote rule-set download | `download_detour` allowed | Use `http_client` and explicit `http_clients` / `route.default_http_client` |
+| DNS response matching | Legacy address filter fields are still usable | Use `evaluate` / `match_response`; legacy address filter behavior is deprecated |
+
+v1.14 deprecated fields may still run today, but new v1.14 templates avoid them to prevent warnings and future migration work.
+
 ## DNS Servers
 
 Each server has `type`, `tag`, and type-specific fields. All remote servers support **Dial Fields**.
@@ -27,21 +42,25 @@ Each server has `type`, `tag`, and type-specific fields. All remote servers supp
 Match conditions combined with AND. Use `"type": "logical"` with `"mode": "and"|"or"` for complex logic.
 
 ### Query Match Fields
-`inbound`, `ip_version`, `query_type` (A/AAAA/HTTPS/etc), `network`, `protocol`, `domain`, `domain_suffix`, `domain_keyword`, `domain_regex`, `source_ip_cidr`, `source_ip_is_private`, `port`, `port_range`, `process_name`, `process_path`, `clash_mode`, `network_type`, `wifi_ssid`, `rule_set`, `invert`
+`inbound`, `ip_version`, `query_type` (A/AAAA/HTTPS/etc), `network`, `protocol`, `domain`, `domain_suffix`, `domain_keyword`, `domain_regex`, `source_ip_cidr`, `source_ip_is_private`, `port`, `port_range`, `process_name`, `process_path`, `clash_mode`, `network_type`, `wifi_ssid`, `rule_set`, `preferred_by` (1.14+ DNS rule item), `match_response` (1.14+), `invert`
 
 ### Response Filter Fields (A/AAAA/HTTPS only)
 `ip_cidr`, `ip_is_private`, `ip_accept_any`
+
+In v1.14, legacy address filter behavior is deprecated. For response-aware logic, use `evaluate` before a rule with `match_response: true` and response match fields.
 
 ### DNS Rule Actions
 - `"action": "route"` — route to server: `server` (required), `strategy`, `disable_cache`, `rewrite_ttl`, `client_subnet`
 - `"action": "route-options"` — set options without routing: `disable_cache`, `rewrite_ttl`, `client_subnet`（非终结动作）
 - `"action": "reject"` — 默认返回 REFUSED (`method: "default"`)，或 `"drop"` 丢弃请求。`no_drop`: 30 秒内触发 50 次后自动临时切换为 drop
 - `"action": "predefined"` — 返回预定义响应：`rcode`（NOERROR/NXDOMAIN/SERVFAIL/REFUSED）、`answer`/`ns`/`extra`（DNS 记录文本）
+- `"action": "evaluate"` — v1.14+ evaluates a DNS response so later rules can match it with `match_response: true`.
+- `"action": "respond"` — v1.14+ returns the evaluated DNS response directly.
 
 ## Route Rules
 
 ### Match Fields
-`inbound`, `ip_version`, `network` (tcp/udp/icmp), `protocol`, `client`, `domain`, `domain_suffix`, `domain_keyword`, `domain_regex`, `source_ip_cidr`, `source_ip_is_private`, `ip_cidr`, `ip_is_private`, `source_port`, `port`, `port_range`, `process_name`, `process_path`, `process_path_regex`, `package_name`, `user`, `user_id`, `clash_mode`, `network_type`, `network_is_expensive`, `wifi_ssid`, `wifi_bssid`, `rule_set`, `rule_set_ip_cidr_match_source`, `preferred_by`, `invert`
+`inbound`, `ip_version`, `network` (tcp/udp/icmp), `protocol`, `client`, `domain`, `domain_suffix`, `domain_keyword`, `domain_regex`, `source_ip_cidr`, `source_ip_is_private`, `ip_cidr`, `ip_is_private`, `source_port`, `port`, `port_range`, `process_name`, `process_path`, `process_path_regex`, `package_name`, `user`, `user_id`, `clash_mode`, `network_type`, `network_is_expensive`, `wifi_ssid`, `wifi_bssid`, `rule_set`, `rule_set_ip_cidr_match_source`, `invert`
 
 ### Final Actions
 - `"action": "route"` — `outbound` (required) + route-options fields
@@ -327,6 +346,8 @@ Available: `chrome`, `firefox`, `edge`, `safari`, `360`, `qq`, `ios`, `android`,
 
 ## Rule-Set
 
+v1.13 remote rule-set:
+
 ```json
 {
   "type": "remote",
@@ -338,12 +359,28 @@ Available: `chrome`, `firefox`, `edge`, `safari`, `360`, `qq`, `ios`, `android`,
 }
 ```
 
+v1.14 remote rule-set:
+
+```json
+{
+  "type": "remote",
+  "tag": "geosite-cn",
+  "format": "binary",
+  "url": "https://testingcf.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
+  "http_client": "rule-set-direct",
+  "update_interval": "1d"
+}
+```
+
 Formats: `source` (JSON, larger) or `binary` (SRS, smaller+faster).
 Types: `remote` (URL download), `local` (file path), `inline` (embedded rules).
+In v1.14, top-level `http_clients` plus `route.default_http_client` should be configured explicitly to avoid the deprecated implicit default HTTP client.
 
 ## Experimental
 
 ### Cache File
+v1.13:
+
 ```json
 {
   "enabled": true,
@@ -352,8 +389,20 @@ Types: `remote` (URL download), `local` (file path), `inline` (embedded rules).
   "rdrc_timeout": "7d"
 }
 ```
+
+v1.14:
+
+```json
+{
+  "enabled": true,
+  "store_dns": true,
+  "store_fakeip": true
+}
+```
+
 - `store_fakeip`: 持久化 fakeip 映射，重启后不丢失（否则报 "missing fakeip record"）
-- `store_rdrc`: 持久化 DNS 响应过滤的拒绝结果缓存（RDRC = Rejected DNS Response Cache）。当 DNS 规则中的响应过滤字段（`ip_cidr`、`ip_is_private`、`ip_accept_any`）拒绝了某个 DNS 响应时，这个拒绝结果会被缓存。下次相同查询直接返回拒绝，跳过实际 DNS 请求。在分流场景中，这避免了重复向错误的 DNS 服务器发送查询（如国内 DNS 解析被污染的海外域名），提升性能。
+- `store_rdrc`: v1.13 可用；v1.14 已弃用。持久化 DNS 响应过滤的拒绝结果缓存（RDRC = Rejected DNS Response Cache）。
+- `store_dns`: v1.14+ DNS cache persistence. 配合 `dns.optimistic` 可降低重复查询的尾延迟。
 - `rdrc_timeout`: 拒绝缓存过期时间，默认 `"7d"`
 - `cache_id`: 隔离多配置间的缓存数据
 
@@ -376,7 +425,8 @@ Types: `remote` (URL download), `local` (file path), `inline` (embedded rules).
     "rule_set": [],
     "final": "proxy",
     "auto_detect_interface": true,
-    "default_domain_resolver": "local-dns"
+    "default_domain_resolver": "local-dns",
+    "default_http_client": "rule-set-direct"
   }
 }
 ```
@@ -384,8 +434,11 @@ Types: `remote` (URL download), `local` (file path), `inline` (embedded rules).
 - `final`: Default outbound when no rule matches
 - `auto_detect_interface`: Bind to default interface (prevents TUN routing loops)
 - `default_domain_resolver`: DNS server for resolving domain-based outbound addresses
+- `default_http_client`: v1.14+ default HTTP client tag for remote rule-set downloads
 
 ## DNS Top-Level Fields
+
+v1.13:
 
 ```json
 {
@@ -394,14 +447,32 @@ Types: `remote` (URL download), `local` (file path), `inline` (embedded rules).
     "rules": [],
     "final": "google-dns",
     "strategy": "ipv4_only",
+    "reverse_mapping": true,
     "independent_cache": true
+  }
+}
+```
+
+v1.14:
+
+```json
+{
+  "dns": {
+    "servers": [],
+    "rules": [],
+    "final": "alidns",
+    "strategy": "ipv4_only",
+    "reverse_mapping": true,
+    "optimistic": true
   }
 }
 ```
 
 - `final`: Default DNS server when no rule matches
 - `strategy`: `prefer_ipv4`, `prefer_ipv6`, `ipv4_only`, `ipv6_only`
-- `independent_cache`: Per-server DNS cache (prevents cross-contamination)
+- `reverse_mapping`: Store real DNS A/AAAA answers as TTL-bound IP→domain mappings; required by RealIP TUN templates that rely on domain rules after DNS hijack.
+- `independent_cache`: v1.13 cache isolation; v1.14 deprecated because DNS cache is always keyed by transport.
+- `optimistic`: v1.14+ optimistic DNS cache; returns an expired cached response immediately while refreshing in the background.
 
 ## Route-Options Action Fields
 

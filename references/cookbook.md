@@ -16,6 +16,8 @@ App 发起连接 (e.g. curl google.com)
   ├─ 查找进程信息 (process_name/path)
   ├─ FakeIP 反查：目标 IP 在 fakeip store 中？
   │    是 → metadata.Destination 从 IP 还原为域名，标记 FakeIP=true
+  ├─ RealIP reverse mapping：目标真实 IP 有 DNS 映射？
+  │    是 → metadata.Domain = 映射域名，供域名规则匹配
   │
   ├─ 遍历规则 (first-final-action-wins):
   │    Rule 0: action=sniff → 偷看数据，识别协议/域名，【不中断，继续下一条】
@@ -50,6 +52,12 @@ FakeIP 反查发生在规则遍历**之前**（matchRule 的第一步）。这�
 - matchRule 先查 fakeip store → 发现 198.18.0.32 = google.com
 - metadata.Destination 变为 google.com
 - 后续规则基于域名 google.com 匹配，而非 IP
+
+### RealIP reverse mapping 时机
+
+RealIP 模板必须设置 `dns.reverse_mapping: true`。DNS router 收到非 FakeIP 的 A/AAAA 响应后，会按 DNS TTL 写入 `真实 IP -> domain` 的内存映射。连接进入 TUN 后，如果目标 IP 不是 FakeIP，路由器会查 `LookupReverseMapping()`，命中后把域名保存到 `metadata.Domain`，后续域名规则和 sniff 结果共同参与匹配。
+
+RealIP 的优势是应用拿到真实 IP，浏览器、系统缓存和调试工具语义自然；弱点是一个真实 IP 可能对应多个域名，映射随 TTL 过期，且 ECH、非 TLS、不可 sniff 流量会降低域名归因确定性。
 
 ## 2. DNS 查询流程
 
@@ -197,6 +205,17 @@ FakeIP 反查还原域名后，路由规则选定了出站，此时真正的 DNS
 
 **解决方案：** 修改 fakeip 相关规则后，必须清除 SFM 缓存并重启 VPN。
 
+### RealIP vs FakeIP 模板选择
+
+| 模板 | 优势 | 代价 |
+|------|------|------|
+| RealIP 模板（兼容性优先） | 应用拿真实 IP；浏览器 Local Network Access、Service Worker、系统缓存和抓包调试更符合直觉；适合大多数 TUN 和浏览器场景。 | 域名恢复依赖 `dns.reverse_mapping` 的 TTL 映射与 sniff，CDN 共享 IP、ECH、非 TLS、不可 sniff 流量下可能不如 FakeIP 确定。 |
+| FakeIP 模板（分流确定性优先） | DNS 阶段给每个域名分配 fake IP，连接阶段可更确定地反查回域名；适合 RealIP reverse mapping/sniff 不够稳定的强域名分流场景。 | 可能触发浏览器 Local Network Access；fake IP 可能污染 Service Worker/浏览器缓存；映射缺失会报 `missing fakeip record`；规则变更后旧映射可能残留；ping/traceroute/日志 IP 语义失真。 |
+
+FakeIP 可以降低应用侧 DNS 等待，因为 FakeIP transport 对 A/AAAA 直接返回 fake IP，不做真实 DNS 查询。但真实解析没有消失：proxy 出站通常交给远端解析，direct 出站仍需本地解析。若主要诉求只是 DNS 延迟，优先用 `dns.optimistic`、`store_dns` 和缓存策略；只有同时需要连接阶段域名恢复确定性时才选择 FakeIP。
+
+浏览器场景如果已经出现 LNA、Service Worker 或缓存污染问题，优先使用 RealIP TUN，或给浏览器单独提供 mixed/socks/http inbound，让浏览器以域名形式交给代理链路，而不是继续依赖 FakeIP。
+
 ## 5. 路由规则匹配逻辑
 
 ### 条件组合规则
@@ -333,14 +352,24 @@ FakeIP 反查还原域名后，路由规则选定了出站，此时真正的 DNS
 ```
 
 ### 模式 B: "国内外 DNS 分流"
+
+RealIP 模板默认用真实 DNS 分流：
+
+```json
+{ "rule_set": "geosite-cn", "server": "alidns" },
+{ "rule_set": "geosite-geolocation-!cn", "server": "google-dns" }
+```
+
+FakeIP 模板才使用 FakeIP 兜底：
+
 ```json
 { "rule_set": "geosite-cn", "server": "alidns" },     // 国内域名 → 国内 DNS
 { "query_type": ["A","AAAA"], "server": "fakeip-dns" } // 其他 → FakeIP
 ```
 顺序重要：geosite-cn 必须在 fakeip 之前，否则国内域名也会被 fakeip 劫持。
 
-### 模式 C: "域名直连绕过 FakeIP"
-需要 DNS + 路由双规则，且都在 fakeip/CN 规则之前：
+### 模式 C: "域名直连"
+需要 DNS + 路由双规则，且都在 CN/代理兜底之前。FakeIP 模板下也要放在 fakeip 兜底之前：
 ```json
 // dns.rules: 真实解析
 { "domain_suffix": ["example.com"], "server": "local-dns" }

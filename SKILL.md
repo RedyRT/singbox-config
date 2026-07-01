@@ -1,22 +1,55 @@
 ---
 name: singbox-config
-description: "Generate, modify, and debug sing-box client configuration files (v1.12+). Covers TUN and system proxy modes for end-user devices (SFM/SFA/SFI/CLI). Does NOT cover server-side setup (proxy server inbound listeners). Use this skill whenever the user mentions sing-box, singbox, SFM, SFA, SFI, TUN/system proxy setup, split routing, rule-set based routing, or asks to create/modify/fix a client config. Also trigger when the user wants specific domains or common foreign sites to always go proxy/direct, needs Clash/V2Ray nodes converted to sing-box (VLESS, VMess, Shadowsocks, Trojan, Hysteria2, TUIC, ShadowTLS, AnyTLS), or is debugging DNS hijack, fakeip, selector, rule-set download, or connectivity issues. Also covers advanced client features: multiplex/mux, TLS fragment (anti-DPI), ECH, proxy chaining (detour), WireGuard endpoints, per-app routing (Android), network strategy (mobile WiFi/cellular), and WiFi SSID-based routing."
+description: "Generate, modify, migrate, and debug version-aware sing-box client configuration files for v1.13 and v1.14. Covers TUN and system proxy modes for end-user devices (SFM/SFA/SFI/CLI), RealIP vs FakeIP TUN templates, DNS/routing split rules, remote rule-set downloads, Clash API selectors, and node conversion for VLESS/VMess/Shadowsocks/Trojan/Hysteria2/TUIC/ShadowTLS/AnyTLS. Use when the user mentions sing-box, singbox, SFM/SFA/SFI, TUN/system proxy setup, split routing, DNS hijack, FakeIP, selector behavior, per-app routing, network strategy, TLS fragment/ECH, proxy chaining, or asks to create, update, migrate, or troubleshoot a client config. Does not cover server-side proxy inbound setup."
 ---
 
 # sing-box 客户端配置生成器
 
-生成适用于中国用户的生产级 sing-box **客户端**配置（v1.12+），包含分流路由。本 skill 编码了大量实战经验，避免因配置错误导致网络完全瘫痪。
+生成适用于中国用户的生产级 sing-box **客户端**配置，包含分流路由。本 skill 必须按目标版本生成配置，默认版本由下方版本表维护，避免因跨版本字段误用导致警告、启动失败或网络完全瘫痪。
 
 **覆盖范围：** 客户端（连接到代理服务器的终端设备）— TUN 模式、系统代理模式、SFM/SFA/SFI 图形客户端、命令行 `sing-box run`。
 **不覆盖：** 服务端配置（搭建代理服务器），包括 shadowsocks/vmess/vless/trojan/hysteria2 等协议的 inbound 监听、服务端 TLS（ACME、Reality server）、透明代理网关（tproxy/redirect）。如果用户询问服务端配置，请告知此 skill 仅覆盖客户端，建议参考官方文档 https://sing-box.sagernet.org/configuration/inbound/ 。
 
 ## 参考资料
 
-- `references/cookbook.md` — **优先阅读。** 解释 sing-box 各组件的实际工作原理：连接生命周期、DNS 查询流程、FakeIP 完整生命周期、规则匹配逻辑、常见配置模式和陷阱。还包含高级模式：代理链（detour）、多路复用（multiplex）、TLS 分片、分应用代理、网络策略、WiFi SSID 路由、ECH。
-- `references/config-schema.md` — 完整配置字段参考：所有 DNS 服务器类型、规则匹配字段、路由动作、所有出站类型（含 hysteria2/tuic/shadowtls/anytls）、WireGuard endpoint、TUN 选项、TLS 选项（ECH/uTLS/Reality/Fragment）、multiplex、UDP over TCP、V2Ray transport、NTP、Certificate。
-- `references/template.json` — 生产级模板配置。生成新配置时以此为起点。
+- `references/config-schema.md` — 配置字段参考和版本兼容矩阵：DNS 服务器、DNS/路由规则动作、TUN、rule-set、cache_file、HTTP client、出站协议等。
+- `references/cookbook.md` — 机制说明：连接生命周期、RealIP reverse mapping、FakeIP 生命周期、DNS 查询流程、规则匹配和常见陷阱。
+- `references/templates/config-1.14-tun-realip.json` — v1.14 TUN RealIP 模板（兼容性优先），无 FakeIP，启用 `dns.reverse_mapping`。
+- `references/templates/config-1.14-tun-fakeip.json` — v1.14 TUN FakeIP 模板（分流确定性优先），启用 FakeIP 与 `store_fakeip`。
+- `references/templates/config-1.13-tun.json` — v1.13 TUN 默认模板。
+- `references/template.json` — 当前默认模板，必须等价于当前默认版本模板（截至 2026-07-01 为 `references/templates/config-1.13-tun.json`）。
 - **官方文档**: https://sing-box.sagernet.org/configuration/ — 当用户询问的功能在上述参考中未涉及时，使用 WebFetch 获取。
 - **源码验证（最后手段）**: 当文档和 cookbook 都无法确定某个配置字段的确切行为时，直接阅读 sing-box 源码。仓库地址 `https://github.com/sagernet/sing-box`，如果用户本地有仓库则直接读取。源码是唯一权威来源 — 文档可能过时或不完整。详见下方"源码验证指南"。
+
+## 版本选择流程
+
+生成新配置前先确认目标版本，选项按版本号倒序展示：
+
+| 版本 | 默认状态 | 模板 |
+|------|----------|------|
+| `1.14` | 可选 | `config-1.14-tun-realip.json` 或 `config-1.14-tun-fakeip.json` |
+| `1.13` | **默认** | `config-1.13-tun.json` |
+
+截至 2026-07-01，默认版本为 `1.13`；1.14 仍按 alpha 线处理。未来版本状态变化时，只更新此表和默认模板指向，不要把“推荐”硬编码到正文其他位置。
+
+### 1.14 TUN 模板选择
+
+当用户选择 `1.14` + TUN 时，必须让用户在以下两个模板中选择；用户不指定时使用 RealIP 模板。
+
+| 模板 | 适用场景 | 代价 |
+|------|----------|------|
+| RealIP 模板（兼容性优先） | 大多数 TUN 客户端、多出口 selector、geosite 分流、浏览器场景。应用拿真实 IP，浏览器、系统缓存和调试工具语义更自然。 | 域名恢复依赖 `dns.reverse_mapping` 的 TTL 内存映射和 sniff；CDN 共享 IP、ECH、非 TLS 或不可 sniff 流量下，域名归因可能不如 FakeIP 确定。 |
+| FakeIP 模板（分流确定性优先） | 需要更确定地从连接 IP 恢复域名，且 RealIP reverse mapping/sniff 无法满足规则确定性的场景。 | 可能触发浏览器 Local Network Access、Service Worker/浏览器缓存污染、映射缺失、规则变更后旧映射残留和调试失真。 |
+
+多出口域名分流不等于必须 FakeIP：RealIP 可通过 DNS hijack + `dns.reverse_mapping: true` + sniff 支持域名规则。FakeIP 可以降低应用侧 DNS 等待，但不是首选 DNS 延迟优化方案；若主要诉求是 DNS 延迟，优先评估 `dns.optimistic` 和缓存策略。只有同时需要分流确定性或域名恢复语义时才推荐 FakeIP。
+
+### 运行方式选择
+
+生成配置时还要确认运行方式：
+
+- TUN/VPN：默认，能捕获所有 IP 流量，支持 DNS hijack、RealIP reverse mapping 和 FakeIP。
+- 命令行 system proxy：mixed inbound + `set_system_proxy`，不使用 TUN；应用 DNS 不由 sing-box 劫持，FakeIP 不是核心路径。
+- 手动 mixed/socks/http 代理：浏览器或应用显式使用代理；可避免浏览器直接接触 FakeIP，适合处理浏览器 LNA/缓存问题。
 
 ## 关键规则
 
@@ -43,10 +76,13 @@ description: "Generate, modify, and debug sing-box client configuration files (v
 - `"type": "block"` outbound → 改用 `"action": "reject"` 路由规则
 - `"outbound": "any"` DNS 规则 → 改用 outbound 的 `domain_resolver` 或 route 的 `default_domain_resolver`
 
-### 3. 已弃用（产生警告，v1.14 将移除）
+### 3. 已移除或弃用字段
 
 - inbound 上的 `"sniff": true` → 改用 `"action": "sniff"` 作为首条路由规则
 - 旧版 DNS `"address"` 字段 → 改用 `"type"` + `"server"` 字段
+- v1.14 模板不要使用 `independent_cache`、`store_rdrc`、remote rule-set `download_detour`；这些字段在 1.14 已弃用但未移除，模板不使用是为了无警告。
+- v1.14 remote rule-set 必须显式配置 `http_client` 或 `route.default_http_client`，不要依赖隐式默认 HTTP client。
+- v1.14 DNS response match 字段必须按新语义使用 `match_response` / `evaluate`，不要把旧 Address Filter 行为当成长期兼容方案。
 
 ### 4. IPv6：默认 ipv4_only + 不配 TUN IPv6 地址
 
@@ -72,7 +108,7 @@ description: "Generate, modify, and debug sing-box client configuration files (v
 | IPv4 + IPv6 | 仅 IPv4 | IPv4 经 TUN（代理/规则），IPv6 绕过 TUN（真实网卡直连） |
 | IPv4 + IPv6 | IPv4 + IPv6 | 所有流量经 TUN，sing-box 完全控制 |
 
-经常在不同网络间切换的用户，**仅 IPv4 TUN** 是最安全的通用默认值。代价：在 IPv6 网络上，IPv6 流量绕过 sing-box（不被代理、不被规则匹配）。这可以接受，因为国内 IPv6 直连本来就是最优路径，而需代理的域名使用 fakeip（仅 IPv4）→ 始终进入 TUN。
+经常在不同网络间切换的用户，**仅 IPv4 TUN** 是最安全的通用默认值。代价：在 IPv6 网络上，IPv6 流量绕过 sing-box（不被代理、不被规则匹配）。如果用户要求完整 IPv6 代理，再显式添加 TUN IPv6 地址并确认真实网络 IPv6 可用。
 
 ### 5. 规则集 URL：使用 jsdelivr CDN
 
@@ -100,15 +136,15 @@ https://testingcf.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-{code}.srs
 ## 架构
 
 ```
-DNS 规则（按顺序匹配）：
-  hosts 服务器       → 系统 hosts 文件（最高优先级，ip_accept_any fallthrough）
-  自定义直连域名     → local-dns 或 alidns（绕过 fakeip，获取真实 IP）
-  自定义代理域名     → 通常不需要 DNS 规则（落入 fakeip 兜底即可）
+DNS 规则（按顺序匹配，RealIP 模板默认）：
+  hosts 服务器       → v1.14 用 preferred_by: hosts；v1.13 用 ip_accept_any fallthrough
+  自定义直连域名     → local-dns 或 alidns（获取真实 IP）
+  自定义代理域名     → 如默认 DNS 是国内 DNS，显式走 remote DNS
   clash_mode         → Direct 用 local-dns，Global 用 google-dns
   广告               → reject（阻止 DNS 解析）
   国内域名           → alidns 223.5.5.5（geosite-cn + @cn 变体，真实 IP）
-  其他 A/AAAA       → fakeip（海外域名、未分类域名全部获得 fakeip）
-  final              → google DoH 经代理（仅处理 MX/TXT/SRV 等非 A/AAAA 查询）
+  明确代理域名       → google DoH 经代理（geosite-geolocation-!cn、Google、GitHub、AI 等）
+  final              → alidns（未知域名优先按国内网络解析）
 
 路由（顺序很重要）：
   1. sniff
@@ -124,9 +160,13 @@ DNS 规则（按顺序匹配）：
   11. final → proxy
 ```
 
-## FakeIP 解析生命周期（源码验证）
+## RealIP 与 FakeIP 域名恢复（源码验证）
 
-理解此流程对调试 DNS 问题至关重要。已通过 sing-box 源码验证。
+TUN 捕获连接时，目标通常是 IP:port。要按域名规则分流，sing-box 需要在连接阶段恢复域名。
+
+**RealIP 模板：** 设置 `dns.reverse_mapping: true` 后，DNS router 会把非 FakeIP 的 A/AAAA 响应按 TTL 记录为 `真实 IP -> domain` 的内存映射。连接进入路由时，先查 FakeIP；未命中时查 `LookupReverseMapping()`，再结合 sniff 得到域名规则语义。RealIP 兼容性更好，但真实 IP 可能被多个域名共享，映射随 TTL 过期，ECH/非 TLS/不可 sniff 流量也可能降低域名归因确定性。
+
+**FakeIP 模板：** DNS 阶段返回 fake IP，并保存 `fake IP <-> domain` 的专用映射。连接进入路由时，如果目标 IP 属于 fake IP 范围，route 会直接反查回域名。这提高分流确定性，也可能降低应用侧 DNS 等待，但会引入浏览器 Local Network Access、Service Worker/浏览器缓存污染、映射缺失和调试失真风险。
 
 ```
 1. 应用查询 DNS: example.com → A?
@@ -161,13 +201,13 @@ DNS 规则（按顺序匹配）：
 
 从路由语义出发，不要从 DNS 语义出发。
 
-1. 用户说"这个域名必须走代理"→ 在 CN/直连兜底规则之前添加 `route.rules` 条目，`outbound: "proxy"`。默认不添加 DNS 覆盖。
-2. 用户说"这个域名必须直连"→ 同时添加 DNS 规则和路由规则，放在 CN/fakeip 兜底之前，让域名绕过 fakeip 使用真实直连 DNS。
+1. 用户说"这个域名必须走代理"→ 在 CN/直连兜底规则之前添加 `route.rules` 条目，`outbound: "proxy"`。RealIP 模板且默认 DNS 是国内 DNS 时，同时添加 DNS 规则走 `google-dns`。
+2. 用户说"这个域名必须直连"→ 同时添加 DNS 规则和路由规则，放在 CN/代理兜底之前，让域名使用真实直连 DNS。
 3. 仅在以下情况为代理域名添加 DNS 规则：
    - 更早的 DNS 规则集会将该域名强制发往特定解析器（如 `alidns`）
    - 用户明确要求 `fakeip` 或特定解析器
    - 需要让 DNS 行为与路由路径对齐以便调试或防泄漏
-4. 将 `fakeip-dns` 视为显式覆盖，而非对每个自定义代理域名的自动选择。
+4. 将 `fakeip-dns` 视为 FakeIP 模板中的显式覆盖，而非默认选择。不要为了普通 DNS 延迟单独推荐 FakeIP。
 5. 当用户需要确定性行为时，优先使用显式路由规则而非依赖 `final`。GUI 选择器状态会在运行时改变有效出站。
 6. 不要根据站点语言、受众、品牌或 TLD 推断 `geosite-cn` 成员关系。应验证官方规则集源，或明确声明这是假设。
 
@@ -196,7 +236,7 @@ sing-box 有两种根本不同的流量捕获方式：
 | 层级 | 网络层（L3），捕获所有 IP 流量 | 应用层（L7），仅捕获遵循系统代理设置的应用 |
 | 核心组件 | TUN inbound | mixed/http inbound（代理服务器） |
 | 流量范围 | 所有应用，包括不支持代理的 | 浏览器、curl 等支持代理的应用 |
-| DNS 控制 | 完整（hijack-dns + fakeip） | 无（应用自行 DNS 解析） |
+| DNS 控制 | 完整（hijack-dns + RealIP reverse mapping 或 FakeIP） | 无（应用自行 DNS 解析） |
 | macOS 命令行 | 需要 sudo（创建 utun 设备） | 不需要 sudo |
 | SFM/SFA/SFI | 默认且唯一模式 | 不支持（App Extension 必须以 VPN 运行） |
 
@@ -329,6 +369,8 @@ sing-box 有两种根本不同的流量捕获方式：
 - **DNS 极简**：仅保留 alidns 供 `default_domain_resolver` 使用（direct 出站解析域名）
 - 无 hosts fallthrough、无防泄漏规则（这些仅在 TUN 全流量模式下有意义）
 - `auto_detect_interface` 仍需开启（防止 outbound 路由环路）
+
+版本门控：上述 system proxy 示例是 v1.13 写法。生成 v1.14 system proxy 配置时，将 remote rule-set 的 `download_detour` 改为 `http_client`，并添加 top-level `http_clients` 与 `route.default_http_client`，不要依赖隐式默认 HTTP client。
 
 ## 源码验证指南
 
@@ -488,14 +530,25 @@ IP 格式的服务器地址不需要 `domain_resolver`。
 }
 ```
 
+v1.14 模板使用 `route.default_http_client` 统一选择下载客户端，因此新增 rule-set 通常不需要逐条写 `http_client`：
+
+```json
+{
+  "type": "remote",
+  "tag": "geosite-geolocation-!cn",
+  "format": "binary",
+  "url": "https://testingcf.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-geolocation-!cn.srs"
+}
+```
+
 将路由规则放在 `geosite-cn` / `geoip-cn -> direct` 之前。
 
 ## 自定义域名直连
 
-添加两条规则 — 一条 DNS + 一条路由 — 都放在 CN/fakeip 兜底之前：
+添加两条规则 — 一条 DNS + 一条路由 — 都放在 CN/代理兜底之前：
 
 ```json
-// DNS：绕过 fakeip，使用真实 DNS
+// DNS：使用真实直连 DNS
 { "domain_suffix": ["example.com"], "action": "route", "server": "local-dns" }
 
 // 路由：直连
@@ -512,16 +565,16 @@ IP 格式的服务器地址不需要 `domain_resolver`。
 { "domain_suffix": ["example.com"], "action": "route", "outbound": "proxy" }
 ```
 
-仅在有特定理由覆盖默认 DNS 路径时才添加对应的 DNS 规则：
-
-```json
-{ "domain_suffix": ["example.com"], "action": "route", "server": "fakeip-dns" }
-```
-
-或
+RealIP 模板且 `dns.final` 是国内 DNS 时，同时添加 remote DNS 规则：
 
 ```json
 { "domain_suffix": ["example.com"], "action": "route", "server": "google-dns" }
+```
+
+FakeIP 模板下，仅在用户明确要求时使用：
+
+```json
+{ "domain_suffix": ["example.com"], "action": "route", "server": "fakeip-dns" }
 ```
 
 仅当更早的 DNS 规则会将域名发往错误的解析器时，或用户明确要求 `fakeip` / 非 `fakeip` 行为时，才使用 DNS 覆盖。
@@ -535,7 +588,9 @@ IP 格式的服务器地址不需要 `domain_resolver`。
 | 微信等使用 HTTPDNS 的应用出现 IPv6 `no route to host` | TUN IPv6 地址欺骗应用认为 IPv6 可用；HTTPDNS 绕过 sing-box DNS | 从 TUN `address` 中移除 IPv6（见关键规则 #4） |
 | 规则集无法下载 | GitHub 在国内被墙 | 切换到 `testingcf.jsdelivr.net` CDN |
 | 浏览器 `ERR_PROXY_CONNECTION_FAILED` | 系统/浏览器有残留代理配置 | 检查 Chrome 扩展（SwitchyOmega），或添加 `platform.http_proxy` + mixed inbound |
-| 添加直连规则后域名仍获得 fakeip | 缓存的 fakeip 映射 | 清除 SFM 缓存，重启 VPN |
+| v1.14 启动警告 `download_detour` | remote rule-set 使用旧下载字段 | 改用 `http_client`，并配置 `http_clients` / `route.default_http_client` |
+| v1.14 启动警告 `independent_cache` 或 `store_rdrc` | 使用 1.13 缓存字段 | 删除 `independent_cache`，将 `store_rdrc` 改为 `store_dns` |
+| 添加直连规则后域名仍获得 fakeip | 缓存的 fakeip 映射 | 清除 SFM 缓存、系统 DNS 缓存和浏览器缓存，重启 VPN |
 | GUI 切换后站点意外走直连/代理 | GUI 选择器状态与 JSON `"default"` 不同 | 检查 GUI / Clash API 中的当前选择；如需固定行为添加显式路由规则 |
 | 启动崩溃："dns outbound deprecated" | v1.13 移除了 dns outbound | 删除它，使用 `hijack-dns` action |
 | 启动崩溃："block outbound deprecated" | v1.13 移除了 block outbound | 删除它，使用 `"action": "reject"` |

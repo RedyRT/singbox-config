@@ -432,7 +432,7 @@ v1.14 FakeIP:
   "external_controller": "127.0.0.1:9090",
   "external_ui": "ui",
   "secret": "",
-  "default_mode": "rule"
+  "default_mode": "Rule"
 }
 ```
 

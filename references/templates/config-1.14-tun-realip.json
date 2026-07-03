@@ -12,7 +12,7 @@
       "external_controller": "127.0.0.1:9091",
       "external_ui": "ui",
       "secret": "",
-      "default_mode": "rule"
+      "default_mode": "Rule"
     }
   },
   "dns": {

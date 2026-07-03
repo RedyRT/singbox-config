@@ -22,6 +22,10 @@ As of 2026-07-03, the default version is `1.13`. When 1.14 becomes the default s
 - `1.14 RealIP template (preview enhancement)`: uses `dns.optimistic`, `store_dns`, HTTP client, and newer 1.14 DNS rule capabilities. RealIP itself is not new in 1.14.
 - `1.14 FakeIP template (routing determinism first)`: for cases that require more deterministic recovery from connection IPs back to domains. It may reduce application-side DNS waiting time, but it is not the first-choice DNS latency optimization. Use it only when you accept browser LNA, Service Worker/cache pollution, missing mappings, and debugging ambiguity risks.
 
+## DNS final Policy
+
+`dns.final` is the default DNS server for the DNS stage. It does not follow route `final` or the current Clash API selector choice. The default RealIP template uses `dns.final: alidns`, while `clash_mode` and overseas/proxied-domain DNS rules send explicitly proxied domains to remote DNS. Do not derive `dns.final` dynamically from selector state.
+
 ## Files
 
 - `SKILL.md`: skill entrypoint and operating rules.

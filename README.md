@@ -22,6 +22,10 @@
 - `1.14 RealIP 模板（前瞻增强）`：使用 `dns.optimistic`、`store_dns`、HTTP client 和 1.14 DNS rule 新能力；RealIP 并非 1.14 才支持。
 - `1.14 FakeIP 模板（分流确定性优先）`：用于需要更确定地从连接 IP 恢复域名的场景。它可能降低应用侧 DNS 等待，但不是首选 DNS 延迟优化方案；使用前需要接受浏览器 LNA、Service Worker/缓存污染、映射缺失和调试失真等副作用。
 
+## DNS final 策略
+
+`dns.final` 是 DNS 阶段的默认 DNS server，不会跟随 route `final` 或 Clash API selector 当前选择。默认 RealIP 模板使用 `dns.final: alidns`，并通过 `clash_mode` 和海外/代理域名 DNS rules 将明确代理域名送到 remote DNS。不要用 selector 状态动态决定 `dns.final`。
+
 ## 文件结构
 
 - `SKILL.md`：skill 入口说明和执行规则。

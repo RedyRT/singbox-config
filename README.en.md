@@ -11,14 +11,16 @@ When generating a new config, choose the target version in descending version or
 | Version | Default status | Template |
 | --- | --- | --- |
 | `1.14` | Optional | `references/templates/config-1.14-tun-realip.json` or `references/templates/config-1.14-tun-fakeip.json` |
-| `1.13` | Default | `references/templates/config-1.13-tun.json` |
+| `1.13` | Default | `references/templates/config-1.13-tun.json` or `references/templates/config-1.13-tun-fakeip.json` |
 
-As of 2026-07-01, the default version is `1.13`. When 1.14 becomes the default stable version, update only the version table and default template pointer.
+As of 2026-07-03, the default version is `1.13`. When 1.14 becomes the default stable version, update only the version table and default template pointer.
 
-## 1.14 TUN Templates
+## TUN Templates
 
-- `RealIP template (compatibility first)`: the default choice. Applications receive real IPs, which keeps browser, system cache, and debugging semantics more natural. It supports multi-outlet domain routing through DNS hijack, `dns.reverse_mapping: true`, and sniffing.
-- `FakeIP template (routing determinism first)`: for cases that require more deterministic recovery from connection IPs back to domains. It may reduce application-side DNS waiting time, but it is not the first-choice DNS latency optimization. Use it only when you accept browser LNA, Service Worker/cache pollution, missing mappings, and debugging ambiguity risks.
+- `1.13 RealIP template (default, compatibility first)`: the current default stable template. Applications receive real IPs, which keeps browser, system cache, and debugging semantics more natural. It supports multi-outlet domain routing through DNS hijack, `dns.reverse_mapping: true`, and sniffing. Proxied/overseas domains must have remote DNS rules; otherwise a domestic `dns.final` can still return polluted answers.
+- `1.13 FakeIP template (routing determinism first)`: kept for users who need more deterministic domain recovery or legacy FakeIP behavior. It is not the default.
+- `1.14 RealIP template (preview enhancement)`: uses `dns.optimistic`, `store_dns`, HTTP client, and newer 1.14 DNS rule capabilities. RealIP itself is not new in 1.14.
+- `1.14 FakeIP template (routing determinism first)`: for cases that require more deterministic recovery from connection IPs back to domains. It may reduce application-side DNS waiting time, but it is not the first-choice DNS latency optimization. Use it only when you accept browser LNA, Service Worker/cache pollution, missing mappings, and debugging ambiguity risks.
 
 ## Files
 
@@ -38,7 +40,9 @@ jq empty references/template.json references/templates/*.json
 
 When changing version-specific fields, also check:
 
-- The 1.13 template must not contain `optimistic`, `store_dns`, `http_client`, or `preferred_by`.
+- The 1.13 RealIP template must contain `dns.reverse_mapping: true` and must not contain a FakeIP DNS server or `store_fakeip`.
+- The 1.13 FakeIP template must contain a FakeIP DNS server, an A/AAAA FakeIP rule, and `cache_file.store_fakeip: true`.
+- 1.13 templates must not contain `optimistic`, `store_dns`, `http_client`, `preferred_by`, `default_http_client`, or `http_clients`.
 - 1.14 templates must not contain `independent_cache`, `store_rdrc`, or `download_detour`.
 - The 1.14 RealIP template must contain `dns.reverse_mapping: true` and must not contain a FakeIP DNS server or `store_fakeip`.
 - The 1.14 FakeIP template must contain a FakeIP DNS server, an A/AAAA FakeIP rule, and `cache_file.store_fakeip: true`.

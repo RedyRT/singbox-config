@@ -7,11 +7,12 @@
 
 | Field / behavior | v1.13 template | v1.14 template |
 |------------------|----------------|----------------|
-| Default template status | Current default as of 2026-07-01 | Optional target |
+| Default template status | Current default as of 2026-07-03; RealIP by default, FakeIP optional | Optional target; RealIP by default, FakeIP optional |
 | DNS cache isolation | `independent_cache: true` allowed | Do not use; deprecated because cache keys by transport |
 | DNS persistent cache | `cache_file.store_rdrc` for rejected DNS response cache | `cache_file.store_dns` for DNS cache persistence |
 | DNS optimistic cache | Not used | `dns.optimistic` available |
-| RealIP domain recovery | Use `dns.reverse_mapping: true` when domain rules need IP-to-domain recovery | Same |
+| RealIP domain recovery | Use `dns.reverse_mapping: true` when domain rules need IP-to-domain recovery; use DNS rules for pollution-resistant overseas DNS | Same |
+| FakeIP template | Optional `config-1.13-tun-fakeip.json`; use only for routing determinism or legacy FakeIP behavior | Optional `config-1.14-tun-fakeip.json`; not for DNS latency alone |
 | Hosts fallback | `ip_accept_any` response filter | Prefer `preferred_by: "hosts"` DNS rule item |
 | Remote rule-set download | `download_detour` allowed | Use `http_client` and explicit `http_clients` / `route.default_http_client` |
 | DNS response matching | Legacy address filter fields are still usable | Use `evaluate` / `match_response`; legacy address filter behavior is deprecated |
@@ -140,7 +141,7 @@ Combined HTTP + SOCKS5 proxy. `set_system_proxy` 各平台实现：
 | `hysteria` | `server`, `server_port`, `auth_string`, `tls` | legacy; prefer hysteria2 |
 | `tuic` | `server`, `server_port`, `uuid`, `password`, `tls` | `congestion_control` |
 | `shadowtls` | `server`, `server_port`, `version`, `password`, `tls` | must chain via `detour` |
-| `anytls` | `server`, `server_port`, `password`, `tls` | padding_scheme |
+| `anytls` | `server`, `server_port`, `password`, `tls` | outbound does not require `padding_scheme` |
 | `http` | `server`, `server_port` | `username`, `password`, `tls` |
 | `socks` | `server`, `server_port` | `version`, `username`, `password` |
 | `ssh` | `server`, `server_port`, `user` | `private_key`, `password` |
@@ -219,8 +220,8 @@ ShadowTLS wraps another protocol. Chain with inner outbound:
 | `direct` | - | Direct connection, supports Dial Fields |
 | `selector` | `outbounds` (required), `default`, `interrupt_exist_connections` | Manual switch (Clash API) |
 | `urltest` | `outbounds` (required), `url`, `interval`, `tolerance`, `idle_timeout` | Auto-select by latency |
-| `dns` | - | **REMOVED in 1.13.0** → use `hijack-dns` action |
-| `block` | - | **Deprecated** → use `"action": "reject"` |
+| `dns` | - | Removed in 1.13; use `hijack-dns` route action instead |
+| `block` | - | Still available; use `"action": "reject"` for ordinary rule blocking, reserve `type: "block"` for selector blocking choices |
 
 ### Endpoints (not outbounds — separate `endpoints` array)
 
@@ -379,7 +380,17 @@ In v1.14, top-level `http_clients` plus `route.default_http_client` should be co
 ## Experimental
 
 ### Cache File
-v1.13:
+v1.13 RealIP:
+
+```json
+{
+  "enabled": true,
+  "store_rdrc": true,
+  "rdrc_timeout": "7d"
+}
+```
+
+v1.13 FakeIP:
 
 ```json
 {
@@ -390,7 +401,16 @@ v1.13:
 }
 ```
 
-v1.14:
+v1.14 RealIP:
+
+```json
+{
+  "enabled": true,
+  "store_dns": true
+}
+```
+
+v1.14 FakeIP:
 
 ```json
 {
@@ -445,7 +465,7 @@ v1.13:
   "dns": {
     "servers": [],
     "rules": [],
-    "final": "google-dns",
+    "final": "alidns",
     "strategy": "ipv4_only",
     "reverse_mapping": true,
     "independent_cache": true
@@ -470,7 +490,7 @@ v1.14:
 
 - `final`: Default DNS server when no rule matches
 - `strategy`: `prefer_ipv4`, `prefer_ipv6`, `ipv4_only`, `ipv6_only`
-- `reverse_mapping`: Store real DNS A/AAAA answers as TTL-bound IP→domain mappings; required by RealIP TUN templates that rely on domain rules after DNS hijack.
+- `reverse_mapping`: Store real DNS A/AAAA answers as TTL-bound IP→domain mappings; required by RealIP TUN templates that rely on domain rules after DNS hijack. It does not prevent DNS pollution; route overseas/proxy domains to remote DNS with DNS rules.
 - `independent_cache`: v1.13 cache isolation; v1.14 deprecated because DNS cache is always keyed by transport.
 - `optimistic`: v1.14+ optimistic DNS cache; returns an expired cached response immediately while refreshing in the background.
 
@@ -530,7 +550,7 @@ Useful for TLS certificate validation when system clock is unreliable (embedded 
 
 ### platform.http_proxy（图形客户端专用）
 
-`platform` 是由图形客户端（SFM/SFA/SFI）提供的平台特定设置，命令行 `sing-box run` 会忽略此块。
+`platform` 是由图形客户端（SFM/SFA/SFI）提供的平台特定设置，主要由图形客户端的 PlatformInterface 消费。命令行 `sing-box run` 不应依赖该块生效。
 
 在 TUN (VPN) 内部通过 Network Extension / VPN API 设置系统 HTTP 代理。与 mixed inbound 的 `set_system_proxy` 不同 — 这里不调用 `networksetup`，而是通过 VPN 隧道内部的 API 设置（Apple: `NEProxySettings`）。
 

@@ -6,7 +6,6 @@
   "experimental": {
     "cache_file": {
       "enabled": true,
-      "store_fakeip": true,
       "store_rdrc": true
     },
     "clash_api": {
@@ -36,11 +35,6 @@
         "type": "udp",
         "tag": "alidns",
         "server": "223.5.5.5"
-      },
-      {
-        "type": "fakeip",
-        "tag": "fakeip-dns",
-        "inet4_range": "198.18.0.0/15"
       }
     ],
     "rules": [
@@ -75,16 +69,26 @@
         "server": "alidns"
       },
       {
-        "query_type": [
-          "A",
-          "AAAA"
+        "rule_set": [
+          "geosite-openai",
+          "geosite-anthropic",
+          "geosite-jetbrains-ai",
+          "geosite-category-ai-chat-!cn",
+          "geosite-google",
+          "geosite-youtube",
+          "geosite-github",
+          "geosite-microsoft",
+          "geosite-steam",
+          "geosite-telegram",
+          "geosite-geolocation-!cn"
         ],
         "action": "route",
-        "server": "fakeip-dns"
+        "server": "google-dns"
       }
     ],
-    "final": "google-dns",
+    "final": "alidns",
     "strategy": "ipv4_only",
+    "reverse_mapping": true,
     "independent_cache": true
   },
   "inbounds": [

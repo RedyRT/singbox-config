@@ -57,7 +57,9 @@ FakeIP 反查发生在规则遍历**之前**（matchRule 的第一步）。这�
 
 RealIP 模板必须设置 `dns.reverse_mapping: true`。DNS router 收到非 FakeIP 的 A/AAAA 响应后，会按 DNS TTL 写入 `真实 IP -> domain` 的内存映射。连接进入 TUN 后，如果目标 IP 不是 FakeIP，路由器会查 `LookupReverseMapping()`，命中后把域名保存到 `metadata.Domain`，后续域名规则和 sniff 结果共同参与匹配。
 
-RealIP 的优势是应用拿到真实 IP，浏览器、系统缓存和调试工具语义自然；弱点是一个真实 IP 可能对应多个域名，映射随 TTL 过期，且 ECH、非 TLS、不可 sniff 流量会降低域名归因确定性。
+1.13 已支持 `dns.reverse_mapping`，因此 1.13 RealIP TUN 可作为稳定默认模板。1.14 RealIP 的增强点是 `dns.optimistic`、`store_dns`、HTTP client 与 DNS rule 新能力，不是 RealIP 从无到有。
+
+RealIP 的优势是应用拿到真实 IP，浏览器、系统缓存和调试工具语义自然；弱点是一个真实 IP 可能对应多个域名，映射随 TTL 过期，且 ECH、非 TLS、不可 sniff 流量会降低域名归因确定性。`reverse_mapping` 不负责防 DNS 污染；防污染依赖 DNS rules 将代理/海外域名送到 remote DNS。
 
 ## 2. DNS 查询流程
 
@@ -212,7 +214,7 @@ FakeIP 反查还原域名后，路由规则选定了出站，此时真正的 DNS
 | RealIP 模板（兼容性优先） | 应用拿真实 IP；浏览器 Local Network Access、Service Worker、系统缓存和抓包调试更符合直觉；适合大多数 TUN 和浏览器场景。 | 域名恢复依赖 `dns.reverse_mapping` 的 TTL 映射与 sniff，CDN 共享 IP、ECH、非 TLS、不可 sniff 流量下可能不如 FakeIP 确定。 |
 | FakeIP 模板（分流确定性优先） | DNS 阶段给每个域名分配 fake IP，连接阶段可更确定地反查回域名；适合 RealIP reverse mapping/sniff 不够稳定的强域名分流场景。 | 可能触发浏览器 Local Network Access；fake IP 可能污染 Service Worker/浏览器缓存；映射缺失会报 `missing fakeip record`；规则变更后旧映射可能残留；ping/traceroute/日志 IP 语义失真。 |
 
-FakeIP 可以降低应用侧 DNS 等待，因为 FakeIP transport 对 A/AAAA 直接返回 fake IP，不做真实 DNS 查询。但真实解析没有消失：proxy 出站通常交给远端解析，direct 出站仍需本地解析。若主要诉求只是 DNS 延迟，优先用 `dns.optimistic`、`store_dns` 和缓存策略；只有同时需要连接阶段域名恢复确定性时才选择 FakeIP。
+FakeIP 可以降低应用侧 DNS 等待，因为 FakeIP transport 对 A/AAAA 直接返回 fake IP，不做真实 DNS 查询。但真实解析没有消失：proxy 出站通常交给远端解析，direct 出站仍需本地解析。若主要诉求只是 DNS 延迟，1.14 优先用 `dns.optimistic`、`store_dns` 和缓存策略；1.13 下优先用普通 DNS cache、规则简化或浏览器专用 mixed/socks/http inbound。只有同时需要连接阶段域名恢复确定性时才选择 FakeIP。
 
 浏览器场景如果已经出现 LNA、Service Worker 或缓存污染问题，优先使用 RealIP TUN，或给浏览器单独提供 mixed/socks/http inbound，让浏览器以域名形式交给代理链路，而不是继续依赖 FakeIP。
 
@@ -357,7 +359,7 @@ RealIP 模板默认用真实 DNS 分流：
 
 ```json
 { "rule_set": "geosite-cn", "server": "alidns" },
-{ "rule_set": "geosite-geolocation-!cn", "server": "google-dns" }
+{ "rule_set": ["geosite-google", "geosite-geolocation-!cn"], "server": "google-dns" }
 ```
 
 FakeIP 模板才使用 FakeIP 兜底：

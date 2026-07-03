@@ -11,14 +11,16 @@
 | 版本 | 默认状态 | 模板 |
 | --- | --- | --- |
 | `1.14` | 可选 | `references/templates/config-1.14-tun-realip.json` 或 `references/templates/config-1.14-tun-fakeip.json` |
-| `1.13` | 默认 | `references/templates/config-1.13-tun.json` |
+| `1.13` | 默认 | `references/templates/config-1.13-tun.json` 或 `references/templates/config-1.13-tun-fakeip.json` |
 
-截至 2026-07-01，默认版本为 `1.13`。当 1.14 成为默认稳定版本时，只需要更新版本表和默认模板指向。
+截至 2026-07-03，默认版本为 `1.13`。当 1.14 成为默认稳定版本时，只需要更新版本表和默认模板指向。
 
-## 1.14 TUN 模板
+## TUN 模板
 
-- `RealIP 模板（兼容性优先）`：默认选择。应用拿真实 IP，浏览器、系统缓存和调试工具语义更自然；通过 DNS hijack、`dns.reverse_mapping: true` 和 sniff 支持多出口域名分流。
-- `FakeIP 模板（分流确定性优先）`：用于需要更确定地从连接 IP 恢复域名的场景。它可能降低应用侧 DNS 等待，但不是首选 DNS 延迟优化方案；使用前需要接受浏览器 LNA、Service Worker/缓存污染、映射缺失和调试失真等副作用。
+- `1.13 RealIP 模板（默认，兼容性优先）`：当前默认稳定版模板。应用拿真实 IP，浏览器、系统缓存和调试工具语义更自然；通过 DNS hijack、`dns.reverse_mapping: true` 和 sniff 支持多出口域名分流。代理/海外域名必须有 remote DNS rule，否则 `dns.final` 为国内 DNS 时仍可能污染。
+- `1.13 FakeIP 模板（分流确定性优先）`：保留给需要更确定域名恢复或 legacy FakeIP 行为的用户，不作为默认。
+- `1.14 RealIP 模板（前瞻增强）`：使用 `dns.optimistic`、`store_dns`、HTTP client 和 1.14 DNS rule 新能力；RealIP 并非 1.14 才支持。
+- `1.14 FakeIP 模板（分流确定性优先）`：用于需要更确定地从连接 IP 恢复域名的场景。它可能降低应用侧 DNS 等待，但不是首选 DNS 延迟优化方案；使用前需要接受浏览器 LNA、Service Worker/缓存污染、映射缺失和调试失真等副作用。
 
 ## 文件结构
 
@@ -38,7 +40,9 @@ jq empty references/template.json references/templates/*.json
 
 改动版本字段时，还应检查：
 
-- 1.13 模板不得包含 `optimistic`、`store_dns`、`http_client`、`preferred_by`。
+- 1.13 RealIP 模板必须包含 `dns.reverse_mapping: true`，且不得包含 FakeIP DNS server 或 `store_fakeip`。
+- 1.13 FakeIP 模板必须包含 FakeIP DNS server、A/AAAA FakeIP 规则和 `cache_file.store_fakeip: true`。
+- 1.13 模板不得包含 `optimistic`、`store_dns`、`http_client`、`preferred_by`、`default_http_client`、`http_clients`。
 - 1.14 模板不得包含 `independent_cache`、`store_rdrc`、`download_detour`。
 - 1.14 RealIP 模板必须包含 `dns.reverse_mapping: true`，且不得包含 FakeIP DNS server 或 `store_fakeip`。
 - 1.14 FakeIP 模板必须包含 FakeIP DNS server、A/AAAA FakeIP 规则和 `cache_file.store_fakeip: true`。

@@ -1,4 +1,6 @@
-# Network Modes and Platform Behavior
+# Network Modes and Platform Behavior (1.14.4)
+
+Official references: [TUN](https://sing-box.sagernet.org/configuration/inbound/tun/) and [mixed inbound](https://sing-box.sagernet.org/configuration/inbound/mixed/). Check version badges; the TUN stack changes documented for 1.15 do not apply to this target.
 
 ## Mode Selection
 
@@ -18,6 +20,7 @@ System proxy and manual mixed/http modes do not use FakeIP as their core path be
 - Only a TUN inbound is needed by default; VPN mode captures browser HTTP/HTTPS traffic.
 - `auto_detect_interface: true` prevents routing loops.
 - `stack: "mixed"` provides the best compatibility.
+- `dns_mode: "hijack"` makes TUN DNS handling explicit. With no `dns_address`, the next address after each TUN address is used; custom addresses require corresponding DNS hijack route rules.
 - The same TUN configuration can be used across SFM/SFA/SFI.
 
 SFM sets the system proxy only when the configuration contains `platform.http_proxy.enabled: true` and preferences allow it.
@@ -56,7 +59,9 @@ A system proxy configuration uses a mixed inbound, without a TUN inbound, DNS hi
 }
 ```
 
-v1.13 remote rule-sets can use `download_detour`. v1.14 system proxy configurations should use `http_clients` + `route.default_http_client` or per-rule-set `http_client`.
+1.14.4 system proxy configurations use `http_clients` + `route.default_http_client` or per-rule-set `http_client`. Omit deprecated `download_detour`.
+
+The snippet is a structural fragment: retain the RealIP template's DNS server definitions, actual proxy outbounds, selectors, and rule-sets. Remove the TUN inbound and its catch-all DNS hijack rules when adapting it. For manual proxy use, omit `set_system_proxy` or set it to `false`; configure the application to use the listening address and port. Do not carry FakeIP into a mode without TUN interception.
 
 ## Optional `platform.http_proxy`
 

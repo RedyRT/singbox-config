@@ -1,4 +1,6 @@
-# Rule-Sets and Custom Split Routing
+# Rule-Sets and Custom Split Routing (1.14.4)
+
+Official reference: https://sing-box.sagernet.org/configuration/rule-set/
 
 ## URL Conventions
 
@@ -11,7 +13,16 @@ https://testingcf.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-{code}.srs
 
 URL filenames for `@cn` variant tags use `@`, for example `geosite-apple@cn.srs`. `fastly.jsdelivr.net` can serve as a fallback CDN.
 
-v1.13 remote rule-sets can use `download_detour`. v1.14 templates use `http_clients` + `route.default_http_client` or per-rule-set `http_client`.
+1.14.4 templates use `http_clients` + `route.default_http_client` or per-rule-set `http_client`. Omit deprecated `download_detour` and the implicit default HTTP client.
+
+```json
+{
+  "http_clients": [{ "tag": "rule-set-direct", "detour": "direct" }],
+  "route": { "default_http_client": "rule-set-direct" }
+}
+```
+
+This fragment assumes an outbound tagged `direct`. `initial_path` can seed a remote rule-set before a cached copy exists. Multi-tag definitions require a `{tag}` placeholder in URL/path; keep individual definitions where URL filenames differ from local tags.
 
 ## Common Tags
 
@@ -86,8 +97,10 @@ For RealIP templates with a domestic DNS server as `dns.final`, also add a remot
 In FakeIP templates, use the following only when explicitly requested by the user:
 
 ```json
-{ "domain_suffix": ["example.com"], "action": "route", "server": "fakeip-dns" }
+{ "domain_suffix": ["example.com"], "query_type": ["A", "AAAA"], "action": "route", "server": "fakeip-dns" }
 ```
+
+Keep the IPv4-only AAAA-suppression rule before this rule. FakeIP supports only address queries; HTTPS/SVCB, TXT, MX, and other query types must continue to a real DNS server.
 
 ## Custom-Rule Lookup Strategy
 

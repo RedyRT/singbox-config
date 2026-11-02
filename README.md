@@ -1,56 +1,63 @@
 # singbox-config
 
-[English](README.en.md)
+An English-language skill for generating, migrating, and troubleshooting **sing-box 1.14.4 client configurations**. Covers TUN/VPN, system proxy, manual mixed/SOCKS/HTTP, SFM/SFA/SFI clients, DNS and traffic routing, remote rule-sets, Clash API selectors, and proxy node conversion.
 
-`singbox-config` is a Codex skill for generating, migrating, and troubleshooting sing-box client configuration files. It focuses on client-side use cases, including TUN/VPN, system proxy, SFM/SFA/SFI graphical clients, command-line `sing-box run`, DNS routing, remote rule sets, Clash API selectors, and common proxy node conversion.
+## Release Target
 
-## Version Strategy
+**1.14.4 stable**, released October 24, 2026. Sources checked November 3, 2026:
 
-Before generating a configuration, choose the target version in descending version order:
+- [GitHub release](https://github.com/SagerNet/sing-box/releases/tag/v1.14.4)
+- [Official configuration documentation](https://sing-box.sagernet.org/configuration/)
+- [Migration guide](https://sing-box.sagernet.org/migration/)
+- [Version-pinned source](https://github.com/SagerNet/sing-box/tree/v1.14.4)
 
-| Version | Default status | Template |
-| --- | --- | --- |
-| `1.14` | Optional | `references/templates/config-1.14-tun-realip.json` or `references/templates/config-1.14-tun-fakeip.json` |
-| `1.13` | Default | `references/templates/config-1.13-tun.json` or `references/templates/config-1.13-tun-fakeip.json` |
+The website includes newer development features. Check version badges and use the pinned release when validating compatibility.
 
-As of 2026-07-03, the default version is `1.13`. When 1.14 becomes the default stable version, only the version table and default template pointer need to be updated.
+## Configuration Variants
 
-## TUN Templates
+| Variant | Template | Use |
+|---------|----------|-----|
+| **1.14.4 TUN RealIP** | `references/templates/config-1.14.4-tun-realip.json` | Default; real DNS responses and domain recovery through reverse mapping/sniffing |
+| **1.14.4 TUN FakeIP** | `references/templates/config-1.14.4-tun-fakeip.json` | Optional; more deterministic IP-to-domain recovery |
 
-- `1.13 RealIP template (default, compatibility first)`: the current default stable template. Applications receive real IPs, which keeps browser, system cache, and debugging tool semantics more natural. It supports multi-outbound domain routing through DNS hijack, `dns.reverse_mapping: true`, and sniffing. Proxied/overseas domains must have remote DNS rules; otherwise, when `dns.final` is a domestic DNS server, answers may still be polluted.
-- `1.13 FakeIP template (routing determinism first)`: kept for users who need more deterministic domain recovery or legacy FakeIP behavior. It is not the default.
-- `1.14 RealIP template (preview enhancement)`: uses `dns.optimistic`, `store_dns`, HTTP client, and new 1.14 DNS rule capabilities. RealIP itself is not new in 1.14.
-- `1.14 FakeIP template (routing determinism first)`: for cases that require more deterministic recovery of domains from connection IPs. It may reduce application-side DNS waiting time, but it is not the first-choice DNS latency optimization. Before using it, users must accept side effects such as browser LNA, Service Worker/cache pollution, missing mappings, and distorted debugging results.
+`references/template.json` is identical to the RealIP template. Custom system-proxy/manual modes are described in `references/network-modes.md`.
 
-## DNS final Policy
+Both templates use typed DNS servers, optimistic/persistent DNS caching, explicit HTTP clients for rule-set downloads, and TUN `dns_mode: "hijack"`. IPv4-only defaults include an explicit empty AAAA response and an IPv4 TUN address. FakeIP additionally persists mappings with `store_fakeip`.
 
-`dns.final` is the default DNS server for the DNS stage. It does not follow route `final` or the current Clash API selector choice. The default RealIP template uses `dns.final: alidns`, while `clash_mode` and overseas/proxied-domain DNS rules send explicitly proxied domains to remote DNS. Do not derive `dns.final` dynamically from selector state.
+The built-in routing policy targets users in China: domestic direct traffic, ad blocking, and proxy/service selectors for overseas traffic. Adjust it for the user's location and requirements. `dns.final` is independent of the route final outbound and current selector state; RealIP proxy domains need explicit remote DNS rules.
 
-## File Structure
+Templates contain **placeholder node parameters**. Replace these and update selector/URLTest references before using a configuration.
 
-- `SKILL.md`: skill entrypoint instructions and operating rules.
-- `references/config-schema.md`: configuration field reference and version compatibility matrix.
-- `references/cookbook.md`: explanations of RealIP/FakeIP, DNS, routing, and TUN mechanics.
-- `references/template.json`: current default template, currently equivalent to `references/templates/config-1.13-tun.json`.
-- `references/templates/`: versioned configuration templates.
+## Files
 
-## Verification
+- `SKILL.md`: entrypoint, scope, defaults, and mandatory configuration rules.
+- `references/workflow.md`: generation questions and summary format.
+- `references/config-schema.md`: 1.14.4 field reference.
+- `references/cookbook.md`: DNS/routing mechanisms and configuration patterns.
+- `references/dns-routing.md`, `network-modes.md`, `rule-sets.md`, `node-conversion.md`: task-specific references.
+- `references/templates/`: versioned RealIP and FakeIP templates.
+- `scripts/validate.ps1`: structural checks and optional release-binary validation.
 
-Templates should at least pass JSON syntax validation:
+## Validation
 
-```bash
-jq empty references/template.json references/templates/*.json
+From the skill root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/validate.ps1
+powershell -ExecutionPolicy Bypass -File scripts/validate.ps1 -SingBoxPath C:\tools\sing-box.exe
 ```
 
-When changing version-specific fields, also check:
+The binary must report version 1.14.4. The validator substitutes syntactically valid test credentials in temporary copies, retains the configuration structure, and runs `sing-box check`; it does not start TUN or connect to a proxy. Temporary copies are removed afterward.
 
-- The 1.13 RealIP template must contain `dns.reverse_mapping: true` and must not contain a FakeIP DNS server or `store_fakeip`.
-- The 1.13 FakeIP template must contain a FakeIP DNS server, A/AAAA FakeIP rules, and `cache_file.store_fakeip: true`.
-- 1.13 templates must not contain `optimistic`, `store_dns`, `http_client`, `preferred_by`, `default_http_client`, or `http_clients`.
-- 1.14 templates must not contain `independent_cache`, `store_rdrc`, or `download_detour`.
-- The 1.14 RealIP template must contain `dns.reverse_mapping: true` and must not contain a FakeIP DNS server or `store_fakeip`.
-- The 1.14 FakeIP template must contain a FakeIP DNS server, A/AAAA FakeIP rules, and `cache_file.store_fakeip: true`.
+For a generated configuration containing real node parameters:
+
+```bash
+sing-box version
+sing-box check -c config.json
+```
+
+These checks validate configuration construction, not live connectivity, rule-set downloads, or platform VPN permissions.
 
 ## Scope
 
-This skill only covers sing-box client configuration. It does not cover scenarios such as server-side inbounds, server-side TLS/ACME/Reality, or transparent proxy gateway server deployment.
+Client configuration only. Server-side proxy hosting, inbound TLS/ACME/Reality setup, and transparent gateway deployment are outside this skill's scope.

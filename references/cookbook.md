@@ -1,6 +1,8 @@
-# sing-box Cookbook — How It Works and Configuration Patterns
+# sing-box 1.14.4 Cookbook — How It Works and Configuration Patterns
 
 > This document explains the **execution flow and interactions** of sing-box components; it is not a field reference (see config-schema.md for the field reference).
+
+Target: [stable 1.14.4](https://github.com/SagerNet/sing-box/tree/v1.14.4). Consult the [official migration guide](https://sing-box.sagernet.org/migration/) and version badges when using the rolling documentation.
 
 ## 1. Connection Lifecycle: From TUN to the Destination
 
@@ -57,7 +59,7 @@ FakeIP reverse lookup happens **before** rule iteration (the first step of match
 
 RealIP templates must set `dns.reverse_mapping: true`. After receiving a non-FakeIP A/AAAA response, the DNS router writes an in-memory `real IP -> domain` mapping with the DNS TTL. When a connection enters TUN, if the destination IP is not a FakeIP, the router checks `LookupReverseMapping()` and, on a hit, saves the domain to `metadata.Domain`; subsequent domain rules and sniff results jointly participate in matching.
 
-1.13 already supports `dns.reverse_mapping`, so the 1.13 RealIP TUN template can serve as a stable default. The RealIP enhancements in 1.14 are `dns.optimistic`, `store_dns`, and new HTTP client and DNS rule capabilities, rather than the introduction of RealIP itself.
+The default 1.14.4 RealIP template combines `dns.reverse_mapping`, `dns.optimistic`, `store_dns`, and explicit HTTP clients for remote rule-set downloads.
 
 The advantage of RealIP is that applications receive real IPs, giving browsers, system caches, and debugging tools natural semantics; its weaknesses are that one real IP may correspond to multiple domains, mappings expire with their TTL, and ECH, non-TLS traffic, and traffic that cannot be sniffed reduce the certainty of domain attribution. `reverse_mapping` does not prevent DNS poisoning; protection against poisoning relies on DNS rules sending proxied/overseas domains to remote DNS.
 
@@ -87,69 +89,58 @@ Iterates through dns.rules (matches in order; the first final action takes effec
   │
    ├─ Actions:
    │   route  → sends to the specified DNS server
-   │   reject → returns NXDOMAIN
+    │   reject → returns REFUSED by default
   │
-   ├─ Response filtering (A/AAAA/HTTPS only):
-   │   ip_accept_any: accepts if the response contains any IP
-   │   ip_cidr: accepts only if the response IP is within the specified CIDR range
-   │   ip_is_private: accepts only if the response IP is a private address
-  │
-   │   ↳ If the response does not satisfy the filter → skips this rule and continues matching the next
+    ├─ evaluate → queries a server and saves a response; continues matching
+    │   match_response + ip_accept_any/ip_cidr/ip_is_private/response_rcode
+    │   → tests the evaluated response
+    │   respond → returns that response; route → queries the selected server
   │
   ▼
 No rule matches → uses the server specified by dns.final
 ```
 
-### What ip_accept_any Really Means
+### Hosts Fallback
 
-**It is a response filter, not a query filter.** Execution order:
+Match domains actually provided by the hosts transport:
 
-1. The query is sent to the hosts server
-2. hosts returns a response (which may contain IPs or be empty)
-3. `ip_accept_any` checks: does the response contain any IP?
-   - Yes → accepts the response; the rule matches
-   - No → the rule does not match; **continues to the next rule**
-
-This implements the "check hosts first, fall through if not found" pattern:
 ```json
-{ "ip_accept_any": true, "action": "route", "server": "hosts" }
+{ "preferred_by": "hosts", "action": "route", "server": "hosts" }
 ```
 
-### RDRC (Rejected DNS Response Cache)
+### Explicit Response Matching
 
-RDRC caches rejection results from DNS response filters (`ip_cidr`, `ip_is_private`, `ip_accept_any`).
+Evaluate first, then test and respond. This example falls back to remote DNS when the local response has no addresses:
 
-Workflow:
-1. A DNS query for `google.com` matches the `alidns` (domestic Chinese DNS) rule
-2. alidns returns a poisoned IP (such as `203.0.113.1`)
-3. The rule's response filter (such as a non-matching `ip_cidr` or an empty result for `ip_accept_any`) rejects the response
-4. RDRC caches: `alidns + google.com + A → rejected`
-5. The next time a `google.com` query arrives, the alidns rule is skipped directly without sending an actual DNS request
-6. Matching continues with the next rule (such as fakeip or google-dns)
+```json
+[
+  { "action": "evaluate", "server": "alidns" },
+  { "match_response": true, "ip_accept_any": true, "action": "respond" },
+  { "action": "route", "server": "google-dns" }
+]
+```
 
-**Why this matters:** In the hosts fallthrough pattern (`ip_accept_any`), hosts returns empty results for most domains → every query must ask hosts first before falling through. Once RDRC caches the empty results, subsequent queries skip the hosts rule directly.
+This is not a poisoning detector: a poisoned address still satisfies `ip_accept_any`. Keep explicit remote DNS rules for known proxied domains. `evaluate` must be top-level; `match_response: true` refers to the latest untagged evaluation. Tagged evaluations use a string in `match_response`.
 
-`store_rdrc: true` persists RDRC to cache.db so it survives restarts. `rdrc_timeout` defaults to 7 days.
+Do not mix legacy DNS address filters or DNS rule-action `strategy` with `query_type`/`ip_version` or response-matching features; such combinations can fail at startup.
 
-### What independent_cache Does
+### Cache Persistence and Isolation
 
-- `false` (default): a global cache, shared across DNS servers for the same domain
-- `true`: a separate cache for each DNS server
+1.14.4 keys DNS caches by transport automatically. Omit `independent_cache`. Use `experimental.cache_file.store_dns: true` instead of deprecated `store_rdrc` / `rdrc_timeout`.
 
-Why split-routing scenarios require `true`: if google.com is first resolved by alidns (returning a poisoned IP), google-dns will also hit that poisoned result once cached. Independent caches prevent cross-contamination.
+`dns.optimistic: true` serves an expired cached response while refreshing it in the background, within the default `3d` window. It accepts an object such as `{"enabled": true, "timeout": "1h"}` and conflicts with `disable_cache` / `disable_expire`. DNS rule actions can set `disable_optimistic_cache` for selected queries.
 
 ## 3. How DNS Strategy (strategy) Works
 
-strategy filters in **both the query and response phases**:
+Global `dns.strategy` controls address lookup preferences; `ipv4_only` requests IPv4, `ipv6_only` requests IPv6, and `prefer_ipv4` / `prefer_ipv6` order dual-stack results. Resolver and route `resolve` strategies remain supported.
 
-| Strategy | Query phase | Response phase |
-|------|---------|---------|
-| `ipv4_only` | Receives an AAAA query → immediately returns an empty successful response | Returns only A records |
-| `ipv6_only` | Receives an A query → immediately returns an empty successful response | Returns only AAAA records |
-| `prefer_ipv4` | Queries both types | Places A records first |
-| `prefer_ipv6` | Queries both types | Places AAAA records first |
+Do not assume this alone filters every application DNS packet. For the bundled IPv4-only policy, put this rule first:
 
-`ipv4_only` does not "discard AAAA responses"; it never sends AAAA queries in the first place, so no IPv6 addresses are produced at all.
+```json
+{ "query_type": "AAAA", "action": "predefined", "rcode": "NOERROR" }
+```
+
+It returns a successful empty response for intercepted AAAA queries before hosts, Clash modes, or FakeIP rules. Remove it when enabling full IPv6 support. HTTPDNS and application-managed DoH are outside this rule's scope.
 
 ## 4. Complete FakeIP Lifecycle
 
@@ -214,7 +205,7 @@ After FakeIP reverse lookup restores the domain and routing rules select an outb
 | RealIP template (compatibility first) | Applications receive real IPs; browser Local Network Access, Service Workers, system caches, and packet-capture debugging behave more intuitively; suitable for most TUN and browser scenarios. | Domain recovery relies on TTL-based `dns.reverse_mapping` mappings and sniffing, and may be less certain than FakeIP with shared CDN IPs, ECH, non-TLS traffic, or traffic that cannot be sniffed. |
 | FakeIP template (split-routing certainty first) | Assigns a fake IP to each domain during DNS resolution, allowing more certain reverse lookup back to the domain during connection handling; suitable for scenarios requiring strong domain-based split routing where RealIP reverse mapping/sniffing is not stable enough. | May trigger browser Local Network Access; fake IPs may contaminate Service Worker/browser caches; missing mappings produce `missing fakeip record`; old mappings may remain after rule changes; IP semantics in ping/traceroute/logs are distorted. |
 
-FakeIP can reduce application-side DNS waiting because the FakeIP transport returns fake IPs directly for A/AAAA without performing real DNS queries. But real resolution has not disappeared: proxy outbounds usually delegate resolution to the remote end, while direct outbounds still require local resolution. If the main concern is simply DNS latency, prefer `dns.optimistic`, `store_dns`, and caching strategies in 1.14; in 1.13, prefer ordinary DNS cache, simplified rules, or a browser-specific mixed/socks/http inbound. Choose FakeIP only when certainty of domain recovery during connection handling is also needed.
+FakeIP can reduce application-side DNS waiting because it answers address queries without real resolution. Real resolution still occurs at the remote proxy or the direct outbound. For DNS latency alone, prefer `dns.optimistic`, `store_dns`, simpler rules, or a browser-specific mixed/socks/http inbound. Choose FakeIP when deterministic domain recovery is also needed.
 
 If LNA, Service Worker, or cache contamination issues have already appeared in browser scenarios, prefer RealIP TUN or provide a separate mixed/socks/http inbound for the browser, allowing it to pass domain names to the proxy chain rather than continuing to rely on FakeIP.
 
@@ -222,7 +213,7 @@ If LNA, Service Worker, or cache contamination issues have already appeared in b
 
 ### Rules for Combining Conditions
 
-Within a single rule: **AND for fields of different types, OR for fields of the same type**
+Within a field, values use OR. Related destination fields (domain/IP), port fields, source-address fields, and source-port fields form OR groups; those groups and other fields combine with AND. Use logical rules for explicit combinations.
 
 ```json
 {
@@ -340,17 +331,17 @@ This means that even if dns.rules contains complex split-routing logic, `default
 
 | Stack | TCP | UDP | Compatibility | Performance |
 |---|---|---|---|---|
-| `system` | System TCP stack | Unsupported | Best TCP compatibility | High |
+| `system` | System stack | System stack | Platform-dependent | High |
 | `gvisor` | Userspace TCP | Userspace UDP | Complete, but may have edge-case issues | Medium |
 | `mixed` | System TCP | gvisor UDP | **Recommended** | High |
 
-`mixed` combines the advantages of both: TCP uses the system stack for compatibility, while UDP uses gvisor for support.
+`mixed` uses the system TCP stack and gVisor UDP stack and remains the template default for 1.14.4. Do not apply the 1.15 stack migration to this release.
 
 ## 9. Common Configuration Patterns
 
-### Pattern A: "Query First, Then Match" (hosts fallthrough)
+### Pattern A: Hosts-Aware Matching
 ```json
-{ "ip_accept_any": true, "server": "hosts" }  // Use the result if found; otherwise continue
+{ "preferred_by": "hosts", "action": "route", "server": "hosts" }
 ```
 
 ### Pattern B: "Split DNS Routing for Domestic Chinese and Overseas Domains"
@@ -410,7 +401,7 @@ Remove the IPv6 address from TUN, keeping only IPv4:
 "address": "172.19.0.1/30"
 ```
 
-Keep `dns.strategy: "ipv4_only"` (it works for standard DNS), but it does not solve the HTTPDNS problem.
+Keep `dns.strategy: "ipv4_only"` and the explicit AAAA-suppression DNS rule. Neither can control addresses obtained through HTTPDNS.
 
 ## 11. Proxy Chains (Chained Outbounds / Detour)
 
@@ -438,7 +429,7 @@ App → sing-box → ShadowTLS (outer) → Shadowsocks (inner) → destination
 }
 ```
 
-`server`/`server_port` are ignored when `detour` is present; traffic goes directly into the outbound specified by detour. However, the fields must still be present (they can be set to arbitrary values).
+For this ShadowTLS wrapping pattern, the outer outbound determines the physical server connection. Do not generalize that to all detours: a normal proxy-to-proxy chain still needs the inner proxy's actual server address and port, which the upstream proxy connects to.
 
 ## 12. Multiplexing (Multiplex / Mux)
 
@@ -473,8 +464,7 @@ Splits TLS ClientHello into small fragments to bypass DPI (deep packet inspectio
   "tls": {
     "enabled": true,
     "fragment": true,
-    "fragment_fallback_delay": "500ms",
-    "record_fragment": true
+    "fragment_fallback_delay": "500ms"
   }
 }
 ```
@@ -484,11 +474,12 @@ Splits TLS ClientHello into small fragments to bypass DPI (deep packet inspectio
 {
   "rule_set": "geosite-geolocation-!cn",
   "action": "route-options",
-  "tls_fragment": { "enabled": true, "size": "1:5", "delay": "0:5" }
+  "tls_fragment": true,
+  "tls_fragment_fallback_delay": "500ms"
 }
 ```
 
-`size` and `delay` use the `"min:max"` format (bytes/milliseconds), choosing a random value each time.
+`tls_fragment` is a boolean, not an object. `fragment_fallback_delay` is the wait used when segmentation timing cannot be detected, not a retry timeout. TLS `fragment` and `record_fragment` are mutually exclusive; route `tls_fragment` and `tls_record_fragment` are also mutually exclusive. Choose one method, preferably record fragmentation first as advised by the official documentation.
 
 ## 14. Android Per-App Proxying
 
@@ -572,7 +563,7 @@ ECH encrypts the SNI in the TLS handshake, preventing intermediate devices from 
 
 Three configuration modes:
 1. **Automatic DNS query** (recommended): set only `"enabled": true`; sing-box automatically queries DNS HTTPS records to obtain the ECH configuration
-2. **Manual configuration**: `"config": ["base64-encoded-ECHConfigList"]`
+2. **Manual configuration**: `config` contains PEM-format ECH configuration lines
 3. **File path**: `"config_path": "path/to/ech.pem"`
 
 **Note:** ECH requires server-side support. CDNs such as CloudFlare generally support it.

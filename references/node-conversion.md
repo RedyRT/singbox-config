@@ -1,4 +1,6 @@
-# Node Conversion Reference
+# Node Conversion Reference (sing-box 1.14.4)
+
+Target [1.14.4](https://github.com/SagerNet/sing-box/tree/v1.14.4). Use the [official outbound documentation](https://sing-box.sagernet.org/configuration/outbound/) and check version badges before adding fields from rolling docs.
 
 Use this file when converting Clash YAML, V2Ray share information, or manually supplied protocol parameters to sing-box outbounds.
 
@@ -164,3 +166,13 @@ Clash `auth` maps to sing-box `password`.
 ```
 
 A standard AnyTLS outbound requires at least `server`, `server_port`, `password`, and `tls`. `padding_scheme` applies to inbound/user-related scenarios and is not a required field for a standard outbound.
+
+1.14.4 also supports optional `client_metadata` and idle-session controls. Preserve these if supplied by the user; do not invent server credentials or metadata.
+
+## Conversion Checks
+
+- Replace every placeholder in the selected template and update selector/URLTest member tags consistently.
+- Preserve TLS/SNI, transport, authentication, and detour semantics; do not add unrelated transport features.
+- For a domain-based proxy server, use a bootstrap `domain_resolver` or the route default that does not depend on the proxy being connected.
+- Prefer `action: "reject"` / `hijack-dns` for old special-outbound rules, typed DNS servers, and explicit HTTP clients when importing a full legacy configuration.
+- Run `sing-box check -c config.json` with version 1.14.4 after conversion. A valid schema does not prove server reachability or credential correctness.

@@ -1,23 +1,24 @@
-# sing-box Configuration Schema Reference (v1.12+)
+# sing-box Configuration Schema Reference (1.14.4)
 
 > Authoritative docs: https://sing-box.sagernet.org/configuration/
-> When in doubt about a field, fetch the latest docs with WebFetch.
+> Target: stable 1.14.4. Check version badges in the rolling documentation and confirm uncertain fields against https://github.com/SagerNet/sing-box/tree/v1.14.4/option.
 
-## Version Matrix
+## Target Configuration
 
-| Field / behavior | v1.13 template | v1.14 template |
-|------------------|----------------|----------------|
-| Default template status | Current default as of 2026-07-03; RealIP by default, FakeIP optional | Optional target; RealIP by default, FakeIP optional |
-| DNS cache isolation | `independent_cache: true` allowed | Do not use; deprecated because cache keys by transport |
-| DNS persistent cache | `cache_file.store_rdrc` for rejected DNS response cache | `cache_file.store_dns` for DNS cache persistence |
-| DNS optimistic cache | Not used | `dns.optimistic` available |
-| RealIP domain recovery | Use `dns.reverse_mapping: true` when domain rules need IP-to-domain recovery; use DNS rules for pollution-resistant overseas DNS | Same |
-| FakeIP template | Optional `config-1.13-tun-fakeip.json`; use only for routing determinism or legacy FakeIP behavior | Optional `config-1.14-tun-fakeip.json`; not for DNS latency alone |
-| Hosts fallback | `ip_accept_any` response filter | Prefer `preferred_by: "hosts"` DNS rule item |
-| Remote rule-set download | `download_detour` allowed | Use `http_client` and explicit `http_clients` / `route.default_http_client` |
-| DNS response matching | Legacy address filter fields are still usable | Use `evaluate` / `match_response`; legacy address filter behavior is deprecated |
+| Field / behavior | 1.14.4 policy |
+|------------------|---------------|
+| Default template | `config-1.14.4-tun-realip.json`; optional `config-1.14.4-tun-fakeip.json` |
+| DNS cache isolation | Automatic per transport; omit deprecated `independent_cache` |
+| Persistent DNS cache | `cache_file.store_dns: true`; omit deprecated `store_rdrc` / `rdrc_timeout` |
+| Optimistic cache | `dns.optimistic: true` or an object with `enabled` and `timeout` |
+| RealIP domain recovery | `dns.reverse_mapping: true`; explicitly route overseas DNS queries to remote DNS |
+| FakeIP persistence | `cache_file.store_fakeip: true` in the FakeIP variant |
+| Hosts fallback | `preferred_by: "hosts"` |
+| Remote downloads | Explicit `http_client` or `http_clients` / `route.default_http_client`; omit `download_detour` |
+| DNS response matching | Top-level `evaluate`, then `match_response` and a final action |
+| TUN DNS | `dns_mode: "hijack"`; supported `stack: "mixed"` |
 
-v1.14 deprecated fields may still run today, but new v1.14 templates avoid them to prevent warnings and future migration work.
+Do not import 1.15-only fields such as cache-file `buffer_size`/`flush_interval`, TUN `multi_queue`, DNS `dns_server_address`/`dns_search_domain`, or TLS `certificate_sha256`. The stack deprecation in the rolling website starts in 1.15, not this target.
 
 ## DNS Servers
 
@@ -31,32 +32,34 @@ Each server has `type`, `tag`, and type-specific fields. All remote servers supp
 | `https` | 443 | `server`, `server_port`, `path` (/dns-query), `headers`, `tls` |
 | `h3` | 443 | `server`, `server_port`, `path`, `headers`, `tls` |
 | `quic` | 853 | `server`, `server_port`, `tls` |
-| `local` | - | `prefer_go` (1.13.0+) — uses system resolver |
-| `fakeip` | - | `inet4_range` (198.18.0.0/15), `inet6_range` (fc00::/18) |
+| `local` | - | `prefer_go`, `neighbor_domain` — uses system resolver |
+| `fakeip` | - | `inet4_range` (example: 198.18.0.0/15), `inet6_range` (example: 2001:2::/48); configure the desired ranges explicitly |
 | `dhcp` | - | `interface` |
 | `hosts` | - | `path` (default /etc/hosts), `predefined` (domain→IP map) |
-| `tailscale` | - | `service` (tag of tailscale endpoint) |
+| `tailscale` | - | `endpoint` (tag of Tailscale endpoint) |
 | `resolved` | - | `service` (tag of resolved service) |
 
 ## DNS Rules
 
-Match conditions combined with AND. Use `"type": "logical"` with `"mode": "and"|"or"` for complex logic.
+Values within a field match with OR. Related destination fields form an OR group, as do port fields and source-address fields; those groups and other fields combine with AND. Use `"type": "logical"` with `"mode": "and"|"or"` for explicit combinations.
 
 ### Query Match Fields
-`inbound`, `ip_version`, `query_type` (A/AAAA/HTTPS/etc), `network`, `protocol`, `domain`, `domain_suffix`, `domain_keyword`, `domain_regex`, `source_ip_cidr`, `source_ip_is_private`, `port`, `port_range`, `process_name`, `process_path`, `clash_mode`, `network_type`, `wifi_ssid`, `rule_set`, `preferred_by` (1.14+ DNS rule item), `match_response` (1.14+), `invert`
+`inbound`, `ip_version`, `query_type` (A/AAAA/HTTPS/etc), `query_client_subnet`, `query_dnssec`, `network`, `protocol`, `domain`, `domain_suffix`, `domain_keyword`, `domain_regex`, `source_ip_cidr`, `source_ip_is_private`, `source_mac_address`, `source_hostname`, `port`, `port_range`, `process_name`, `process_path`, `package_name`, `package_name_regex`, `clash_mode`, `network_type`, `wifi_ssid`, `rule_set`, `preferred_by`, `invert`
 
-### Response Filter Fields (A/AAAA/HTTPS only)
-`ip_cidr`, `ip_is_private`, `ip_accept_any`
+### Response Matching
 
-In v1.14, legacy address filter behavior is deprecated. For response-aware logic, use `evaluate` before a rule with `match_response: true` and response match fields.
+Use a preceding top-level `evaluate` action and `match_response: true` for the latest untagged response, or `match_response: "tag"` for a tagged evaluation. Match with `ip_cidr`, `ip_is_private`, `ip_accept_any`, `response_rcode`, `response_answer`, `response_ns`, or `response_extra`.
+
+Legacy address filters without `match_response`, DNS rule-action `strategy`, and `rule_set_ip_cidr_accept_empty` are deprecated. Combining them with `query_type`, `ip_version`, or new response-matching features can fail at startup. This does not deprecate global `dns.strategy` or resolver/route-resolve strategy.
 
 ### DNS Rule Actions
-- `"action": "route"` — route to server: `server` (required), `strategy`, `disable_cache`, `rewrite_ttl`, `client_subnet`
-- `"action": "route-options"` — set options without routing: `disable_cache`, `rewrite_ttl`, `client_subnet` (non-final action)
-- `"action": "reject"` — returns REFUSED by default (`method: "default"`), or `"drop"` discards the request. `no_drop`: automatically switches temporarily to drop after being triggered 50 times within 30 seconds
+- `"action": "route"` — route to `server` (required); options include `disable_cache`, `disable_optimistic_cache`, `rewrite_ttl`, `timeout`, `client_subnet`, `remove_client_subnet`, and `speculative`.
+- `"action": "route-options"` — set query options without terminating matching; supports the cache, TTL, timeout, and subnet options above.
+- `"action": "reject"` — returns REFUSED by default, or `method: "drop"` discards the request. Unless `no_drop: true`, repeated rejects can temporarily switch to dropping after 50 triggers in 30 seconds.
 - `"action": "predefined"` — returns a predefined response: `rcode` (NOERROR/NXDOMAIN/SERVFAIL/REFUSED), `answer`/`ns`/`extra` (DNS record text)
-- `"action": "evaluate"` — v1.14+ evaluates a DNS response so later rules can match it with `match_response: true`.
-- `"action": "respond"` — v1.14+ returns the evaluated DNS response directly.
+- `"action": "evaluate"` — sends a query to `server`, optionally tags its response with `tag`, and continues rule matching. Only allowed at the top level.
+- `"action": "respond"` — returns an evaluated response; requires a preceding top-level evaluation.
+- `race: true` on route/respond/reject/predefined rules requires response matching and allows pending evaluations to compete; `speculative` can send a subsequent query while races are pending. Keep ordinary sequential rules unless the user needs advanced DNS racing.
 
 ## Route Rules
 
@@ -67,11 +70,11 @@ In v1.14, legacy address filter behavior is deprecated. For response-aware logic
 - `"action": "route"` — `outbound` (required) + route-options fields
 - `"action": "reject"` — `method`: `default` (RST/ICMP) or `drop`
 - `"action": "hijack-dns"` — redirect DNS to sing-box DNS module (no fields)
-- `"action": "bypass"` — kernel-level bypass (1.13.0+, Linux auto_redirect only)
+- `"action": "bypass"` — kernel-level bypass (Linux auto_redirect pre-match); outside pre-match, routes to the specified outbound or skips the rule when none is set.
 
 ### Non-Final Actions (processing continues to next rule)
 - `"action": "sniff"` — protocol detection. `sniffer` (list), `timeout` (300ms)
-- `"action": "resolve"` — DNS resolve. `server`, `strategy`, `disable_cache`
+- `"action": "resolve"` — DNS resolve. `server`, `strategy`, `disable_cache`, `disable_optimistic_cache`, `rewrite_ttl`, `timeout`, `client_subnet`
 - `"action": "route-options"` — set options: `override_address`, `override_port`, `udp_connect`, `udp_timeout`, `tls_fragment`, `tls_record_fragment`
 
 ## TUN Inbound
@@ -80,9 +83,10 @@ In v1.14, legacy address filter behavior is deprecated. For response-aware logic
 {
   "type": "tun",
   "tag": "tun-in",
-  "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
+  "address": ["172.19.0.1/30"],
   "mtu": 9000,
   "auto_route": true,
+  "dns_mode": "hijack",
   "strict_route": true,
   "stack": "mixed",
   "platform": {
@@ -104,7 +108,11 @@ Key fields:
   - **Linux**: Adds UNREACHABLE rules for address families not configured on TUN (e.g. no IPv6 address configured → IPv6 traffic immediately produces an error rather than leaking to the physical interface). When neither strict_route nor auto_redirect is enabled, ICMP does not go through TUN. When auto_redirect is enabled, this also controls whether `SO_BINDTODEVICE` traffic is redirected.
   - **Windows**: Prevents DNS leaks caused by Windows multihomed DNS resolution behavior.
   - **macOS/mobile**: No special effect (VPN mode itself already captures all traffic).
-- `stack`: `system` (TCP only), `gvisor` (full userspace), `mixed` (system TCP + gvisor UDP, best compatibility)
+- `stack`: `system` (system stack), `gvisor` (userspace), `mixed` (system TCP + gvisor UDP; template default). Supported in 1.14.4.
+- `dns_mode`: `disabled`, `native`, or `hijack`; defaults to `hijack` with `auto_route`, otherwise `disabled`.
+- `dns_address`: Native interface DNS addresses. When unset, uses the next address after each configured TUN family and handles that destination as `hijack-dns`. When explicitly set, add DNS hijack rules for those addresses.
+- `include_mac_address` / `exclude_mac_address`: Linux MAC filtering with `auto_route` and `auto_redirect`.
+- `udp_mapping`, `udp_filtering`, `udp_nat_max`: Shared UDP NAT controls; see the official UDP NAT reference.
 - `platform.http_proxy`: Sets the system HTTP proxy within TUN (VPN). Implemented through the Network Extension API (SFM/SFA/SFI), with no additional permissions required. See "TUN Platform Options" below for details.
 - `auto_redirect`: nftables redirect (Linux, better than auto_route for servers). Recommended to always enable on Linux; it performs better than tproxy and avoids conflicts between TUN and Docker bridges.
 
@@ -220,7 +228,6 @@ ShadowTLS wraps another protocol. Chain with inner outbound:
 | `direct` | - | Direct connection, supports Dial Fields |
 | `selector` | `outbounds` (required), `default`, `interrupt_exist_connections` | Manual switch (Clash API) |
 | `urltest` | `outbounds` (required), `url`, `interval`, `tolerance`, `idle_timeout` | Auto-select by latency |
-| `dns` | - | Removed in 1.13; use `hijack-dns` route action instead |
 | `block` | - | Still available; use `"action": "reject"` for ordinary rule blocking, reserve `type: "block"` for selector blocking choices |
 
 ### Endpoints (not outbounds — separate `endpoints` array)
@@ -233,8 +240,8 @@ ShadowTLS wraps another protocol. Chain with inner outbound:
   "address": ["10.0.0.2/32"],
   "private_key": "your-private-key",
   "peers": [{
-    "server": "wg.example.com",
-    "server_port": 51820,
+    "address": "wg.example.com",
+    "port": 51820,
     "public_key": "peer-public-key",
     "pre_shared_key": "optional",
     "allowed_ips": ["0.0.0.0/0"]
@@ -248,18 +255,18 @@ Goes in top-level `"endpoints": [...]`, not `"outbounds"`. Routable as outbound 
 ## Dial Fields (shared by outbounds + DNS servers)
 
 - `detour`: Upstream outbound tag (other dial fields are ignored when enabled)
-- `domain_resolver`: DNS server tag or `{"server": "tag", "strategy": "..."}` object (1.12.0+)
+- `domain_resolver`: DNS server tag or an object with `server`, `strategy`, and optional cache, TTL, subnet, and query-timeout options.
 - `bind_interface`: Network interface to bind
 - `inet4_bind_address` / `inet6_bind_address`: IPv4/IPv6 address to bind
 - `routing_mark`: Linux netfilter routing mark (supports integers and hexadecimal strings such as `"0x1234"`)
 - `reuse_addr`: Reuse the listening address
-- `netns`: Network namespace (1.12.0+, Linux only)
+- `netns`: Network namespace (Linux only)
 - `connect_timeout`: Connection timeout (Duration)
 - `tcp_fast_open`: Enable TFO (bool)
 - `tcp_multi_path`: Enable MPTCP (bool)
-- `disable_tcp_keep_alive`: Disable TCP Keep-Alive (1.13.0+)
-- `tcp_keep_alive`: Initial Keep-Alive period (1.13.0+, default `5m`)
-- `tcp_keep_alive_interval`: Keep-Alive interval (1.13.0+, default `75s`)
+- `disable_tcp_keep_alive`: Disable TCP Keep-Alive
+- `tcp_keep_alive`: Initial Keep-Alive period (default `5m`)
+- `tcp_keep_alive_interval`: Keep-Alive interval (default `75s`)
 - `udp_fragment`: Enable UDP fragmentation
 - `network_strategy`: `default`, `hybrid`, `fallback` (1.11.0+, mutually exclusive with `bind_interface`)
 - `network_type` / `fallback_network_type`: `wifi`, `cellular`, `ethernet`, `other` (1.11.0+)
@@ -307,22 +314,19 @@ Wrap UDP in TCP for protocols/networks that don't support UDP. Supported by: sha
   "min_version": "1.2",
   "utls": { "enabled": true, "fingerprint": "chrome" },
   "reality": { "enabled": true, "public_key": "...", "short_id": "..." },
-  "ech": { "enabled": true, "config": ["base64-ech-config"] },
-  "fragment": true,
-  "fragment_fallback_delay": "500ms",
-  "record_fragment": true
+  "handshake_timeout": "15s"
 }
 ```
 
 ### ECH (Encrypted Client Hello)
 Encrypts SNI to prevent middlebox detection. Two modes:
-- **Static config**: `"config": ["base64-encoded-ECHConfigList"]`
-- **DNS query**: `"config_path": "file.pem"` or omit config to query DNS HTTPS record via `"query_server_name": "dns.example.com"`
+- **Static config**: `config` is a PEM-format ECH configuration line array; alternatively use `config_path: "ech.pem"` to read a PEM file.
+- **DNS query**: enable ECH and omit both static fields; query HTTPS records for `server_name`, optionally overriding the queried domain with `query_server_name`.
 
 ### TLS Fragment
 Splits TLS ClientHello into small fragments to bypass DPI:
 - `"fragment": true` on TLS options: fragment the TLS handshake
-- `"fragment_fallback_delay"`: time before fallback to unfragmented (default `"500ms"`, source code `constant/timeout.go`)
+- `"fragment_fallback_delay"`: fallback wait when the segmentation delay cannot be detected automatically (default `"500ms"`)
 - `"record_fragment": true`: also fragment TLS records (more aggressive)
 - **`fragment` and `record_fragment` are mutually exclusive** and cannot be enabled simultaneously
 
@@ -331,6 +335,8 @@ Can also be set per-route via route-options action:
 { "action": "route-options", "tls_fragment": true, "tls_fragment_fallback_delay": "500ms" }
 ```
 Note: In route-options, `tls_fragment` is a bool (not an object), and `tls_record_fragment` is also a bool. These two are also mutually exclusive.
+
+The default TLS engine is `go`. Native `apple` / `windows` engines have platform and feature restrictions; use the default engine for Reality/uTLS/ECH/fragmentation. `handshake_timeout` defaults to `15s`. Optional `spoof` / `spoof_method` require supported desktop platforms and elevated privileges; consult the official TLS reference when requested.
 
 ### uTLS Fingerprints
 Available: `chrome`, `firefox`, `edge`, `safari`, `360`, `qq`, `ios`, `android`, `random`, `randomized`
@@ -347,20 +353,7 @@ Available: `chrome`, `firefox`, `edge`, `safari`, `360`, `qq`, `ios`, `android`,
 
 ## Rule-Set
 
-v1.13 remote rule-set:
-
-```json
-{
-  "type": "remote",
-  "tag": "geosite-cn",
-  "format": "binary",
-  "url": "https://testingcf.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
-  "download_detour": "direct",
-  "update_interval": "1d"
-}
-```
-
-v1.14 remote rule-set:
+1.14.4 remote rule-set:
 
 ```json
 {
@@ -375,33 +368,21 @@ v1.14 remote rule-set:
 
 Formats: `source` (JSON, larger) or `binary` (SRS, smaller+faster).
 Types: `remote` (URL download), `local` (file path), `inline` (embedded rules).
-In v1.14, top-level `http_clients` plus `route.default_http_client` should be configured explicitly to avoid the deprecated implicit default HTTP client.
+Define top-level `http_clients` plus `route.default_http_client`, or a per-rule-set HTTP client. Avoid the deprecated implicit default and `download_detour`.
+
+```json
+{
+  "http_clients": [{ "tag": "rule-set-direct", "detour": "direct" }],
+  "route": { "default_http_client": "rule-set-direct" }
+}
+```
+
+HTTP clients accept a shared tag or an inline object. Default engine is `go`, default HTTP version is `2`; versions `1` and `3` are also supported. `initial_path` supplies initial remote rule-set content when no cache is available. Multiple rule-set tags can share a definition using a `{tag}` placeholder in the URL/path.
 
 ## Experimental
 
 ### Cache File
-v1.13 RealIP:
-
-```json
-{
-  "enabled": true,
-  "store_rdrc": true,
-  "rdrc_timeout": "7d"
-}
-```
-
-v1.13 FakeIP:
-
-```json
-{
-  "enabled": true,
-  "store_fakeip": true,
-  "store_rdrc": true,
-  "rdrc_timeout": "7d"
-}
-```
-
-v1.14 RealIP:
+1.14.4 RealIP:
 
 ```json
 {
@@ -410,7 +391,7 @@ v1.14 RealIP:
 }
 ```
 
-v1.14 FakeIP:
+1.14.4 FakeIP:
 
 ```json
 {
@@ -421,9 +402,8 @@ v1.14 FakeIP:
 ```
 
 - `store_fakeip`: Persists fakeip mappings so they are not lost after a restart (otherwise, "missing fakeip record" is reported)
-- `store_rdrc`: Available in v1.13; deprecated in v1.14. Persists the cache of rejected results from DNS response filtering (RDRC = Rejected DNS Response Cache).
-- `store_dns`: v1.14+ DNS cache persistence. Combined with `dns.optimistic`, it can reduce tail latency for repeated queries.
-- `rdrc_timeout`: Rejection cache expiration time, default `"7d"`
+- `store_dns`: DNS cache persistence. Combined with `dns.optimistic`, it can reduce latency for repeated queries.
+- Omit deprecated `store_rdrc` and `rdrc_timeout`.
 - `cache_id`: Isolates cache data between multiple configurations
 
 ### Clash API
@@ -454,26 +434,11 @@ v1.14 FakeIP:
 - `final`: Default outbound when no rule matches
 - `auto_detect_interface`: Bind to default interface (prevents TUN routing loops)
 - `default_domain_resolver`: DNS server for resolving domain-based outbound addresses
-- `default_http_client`: v1.14+ default HTTP client tag for remote rule-set downloads
+- `default_http_client`: Default HTTP client tag or inline HTTP client for remote rule-set downloads
 
 ## DNS Top-Level Fields
 
-v1.13:
-
-```json
-{
-  "dns": {
-    "servers": [],
-    "rules": [],
-    "final": "alidns",
-    "strategy": "ipv4_only",
-    "reverse_mapping": true,
-    "independent_cache": true
-  }
-}
-```
-
-v1.14:
+1.14.4 RealIP (server definitions and rules omitted here):
 
 ```json
 {
@@ -491,8 +456,9 @@ v1.14:
 - `final`: Default DNS server when no rule matches
 - `strategy`: `prefer_ipv4`, `prefer_ipv6`, `ipv4_only`, `ipv6_only`
 - `reverse_mapping`: Store real DNS A/AAAA answers as TTL-bound IP→domain mappings; required by RealIP TUN templates that rely on domain rules after DNS hijack. It does not prevent DNS pollution; route overseas/proxy domains to remote DNS with DNS rules.
-- `independent_cache`: v1.13 cache isolation; v1.14 deprecated because DNS cache is always keyed by transport.
-- `optimistic`: v1.14+ optimistic DNS cache; returns an expired cached response immediately while refreshing in the background.
+- `optimistic`: Serves expired responses while refreshing in the background, within a timeout window. `true` uses `3d`; alternatively use `{"enabled": true, "timeout": "3d"}`. Conflicts with `disable_cache` and `disable_expire`.
+- `timeout`: Default DNS query timeout, `10s`; overridable by DNS rule actions and `domain_resolver.timeout`.
+- For IPv4-only application DNS, put `{"query_type":"AAAA","action":"predefined","rcode":"NOERROR"}` before other DNS rules. Do not treat global lookup strategy as a universal raw-query filter.
 
 ## Route-Options Action Fields
 
@@ -503,17 +469,17 @@ Non-final action that sets per-connection options without selecting an outbound:
   "override_address": "1.2.3.4",
   "override_port": 443,
   "network_strategy": "hybrid",
-  "fallback_delay": "300ms",
+  "fallback_delay": 300,
   "udp_disable_domain_unmapping": false,
   "udp_connect": true,
   "udp_timeout": "5m",
   "tls_fragment": true,
-  "tls_fragment_fallback_delay": "500ms",
-  "tls_record_fragment": true
+  "tls_fragment_fallback_delay": "500ms"
 }
 ```
 - `tls_fragment` and `tls_record_fragment` are **bool** values and are **mutually exclusive**
-- `tls_fragment_fallback_delay`: Fallback delay when a fragmented connection fails (default `500ms`)
+- `tls_fragment_fallback_delay`: Fallback wait when segmentation timing cannot be detected (default `500ms`)
+- `fallback_delay` in route-options is an integer in milliseconds in the 1.14.4 option schema, unlike the duration-valued dial field.
 - `udp_disable_domain_unmapping`: Do not send mapped domain names in UDP responses
 - `udp_timeout`: Connection timeout (default 10s for DNS/NTP/STUN, 30s for QUIC/DTLS)
 
@@ -592,10 +558,22 @@ Sets the system HTTP proxy within TUN (VPN) through the Network Extension / VPN 
 ```json
 {
   "type": "tun",
-  "include_package": ["com.android.chrome"],
-  "exclude_package": ["com.tencent.mm"]
+  "include_package": ["com.android.chrome"]
 }
 ```
 - `include_package` / `exclude_package`: Android per-app proxy (package names)
+- Choose inclusion or exclusion mode rather than configuring both.
 - `include_uid` / `exclude_uid` / `include_uid_range` / `exclude_uid_range`: Linux UID-based filtering
 - `route_address` / `route_exclude_address`: IP-based split tunneling
+
+## Official References
+
+- https://sing-box.sagernet.org/migration/
+- https://sing-box.sagernet.org/configuration/dns/
+- https://sing-box.sagernet.org/configuration/dns/rule/
+- https://sing-box.sagernet.org/configuration/dns/rule_action/
+- https://sing-box.sagernet.org/configuration/inbound/tun/
+- https://sing-box.sagernet.org/configuration/shared/http-client/
+- https://sing-box.sagernet.org/configuration/experimental/cache-file/
+- https://sing-box.sagernet.org/configuration/shared/tls/
+- https://sing-box.sagernet.org/configuration/endpoint/wireguard/

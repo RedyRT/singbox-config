@@ -1,6 +1,10 @@
-# DNS, RealIP, FakeIP, and IPv6
+# DNS, RealIP, FakeIP, and IPv6 (1.14.4)
+
+Sources: [DNS](https://sing-box.sagernet.org/configuration/dns/), [DNS rule actions](https://sing-box.sagernet.org/configuration/dns/rule_action/), [TUN](https://sing-box.sagernet.org/configuration/inbound/tun/), and [migration](https://sing-box.sagernet.org/migration/). Check feature version badges against 1.14.4.
 
 ## DNS hijack
+
+Use `dns_mode: "hijack"` with `auto_route: true`. With `dns_address` unset, the next address after the TUN address is used and traffic to it is handled as `hijack-dns`. An explicit `dns_address` requires matching DNS hijack rules. Keep the routing rules below to intercept other port-53 DNS traffic too.
 
 The first two route rules in TUN templates must be:
 
@@ -20,7 +24,7 @@ Without `sniff` first, protocol detection has not yet run. Using only `"protocol
 
 RealIP templates use real DNS responses. With `dns.reverse_mapping: true`, the DNS router stores non-FakeIP A/AAAA responses in an in-memory `real IP -> domain` mapping according to their TTL. When a connection enters routing, FakeIP is checked first; on a miss, reverse mapping is checked and combined with sniffing to support domain-rule matching.
 
-1.13 already supports the `dns.reverse_mapping` required for RealIP, so 1.13 RealIP TUN can serve as the default stable template. 1.14 RealIP is an enhanced preview template, offering `dns.optimistic`, `store_dns`, HTTP clients, and new DNS rule capabilities.
+The stable 1.14.4 RealIP template is the default. It uses `dns.reverse_mapping`, `dns.optimistic`, `store_dns`, explicit HTTP clients, and hosts-aware DNS rules.
 
 `reverse_mapping` does not validate or correct DNS responses, nor prevent poisoning. If domestic DNS returns a poisoned IP for an overseas domain, it simply records that poisoned IP's mapping. To avoid DNS poisoning for overseas domains, RealIP templates must route explicitly proxied/overseas rule-sets to remote DNS in their DNS rules.
 
@@ -53,7 +57,9 @@ Trade-offs:
 - Old mappings may persist after rule changes.
 - IP semantics in ping/traceroute/logs become misleading.
 
-FakeIP does not eliminate real resolution: proxy outbounds usually pass the domain to the remote proxy for resolution; direct outbounds still need local resolution. If DNS latency is the only main concern, prioritize `dns.optimistic`, `store_dns`, and caching strategies in 1.14. Since 1.13 does not support these new fields, prefer ordinary DNS caching, simpler rules, or a browser-specific mixed/socks/http inbound.
+FakeIP does not eliminate real resolution: proxy outbounds usually pass the domain to the remote proxy for resolution; direct outbounds still need local resolution. For DNS latency alone, prioritize `dns.optimistic`, `store_dns`, simpler rules, or a browser-specific mixed/socks/http inbound.
+
+`dns.optimistic: true` uses a `3d` stale-cache window. An object such as `{"enabled": true, "timeout": "1h"}` customizes it. It conflicts with `disable_cache` and `disable_expire`; individual DNS rule actions can disable optimistic caching. Persist the full DNS cache with `store_dns`, and omit deprecated `independent_cache`, `store_rdrc`, and `rdrc_timeout`.
 
 ## FakeIP Lifecycle
 
@@ -75,7 +81,7 @@ FakeIP does not eliminate real resolution: proxy outbounds usually pass the doma
 
 RealIP template defaults:
 
-- hosts takes priority.
+- The IPv4-only AAAA-suppression rule runs first, then hosts-aware matching with `preferred_by: "hosts"`.
 - Domestic domains use `alidns`.
 - Explicitly proxied domains use remote DNS.
 - final defaults to domestic DNS.
@@ -83,7 +89,7 @@ RealIP template defaults:
 FakeIP template defaults:
 
 - Domestic domains use real domestic DNS.
-- Other A/AAAA queries can use `fakeip-dns`.
+- Other address queries can use `fakeip-dns`; the IPv4-only template suppresses AAAA first, so only A queries reach it by default.
 - `experimental.cache_file.store_fakeip: true` must be enabled.
 
 ## Default IPv6 Strategy
@@ -93,6 +99,14 @@ Use IPv4-only by default:
 ```json
 "strategy": "ipv4_only"
 ```
+
+Also put this explicit rule first in `dns.rules` to suppress intercepted application AAAA queries, including before Clash mode and FakeIP rules:
+
+```json
+{ "query_type": "AAAA", "action": "predefined", "rcode": "NOERROR" }
+```
+
+Global strategy remains a lookup preference; do not rely on it as a universal filter for raw DNS exchanges. Do not use deprecated DNS rule-action `strategy` alongside `query_type`/`ip_version` or modern response matching. For address-based response filtering, evaluate a response first and use `match_response`.
 
 Unless the user confirms that IPv6 works on the actual network and requests full IPv6 TUN support, do not assign an IPv6 address to the TUN inbound:
 
@@ -110,6 +124,8 @@ Reason: assigning an IPv6 address to TUN makes the system consider IPv6 availabl
 
 | Network environment | TUN addresses | Behavior |
 |----------|----------|------|
-| IPv4 only | IPv4 only | All traffic passes through TUN; applications fall back to IPv4 natively |
-| IPv4 + IPv6 | IPv4 only | IPv4 passes through TUN; IPv6 bypasses TUN |
+| IPv4 only | IPv4 only | IPv4 is captured; IPv6 fallback depends on application and platform behavior |
+| IPv4 + IPv6 | IPv4 only | IPv4 is captured; IPv6 may bypass TUN or be blocked by platform strict-routing behavior |
 | IPv4 + IPv6 | IPv4 + IPv6 | Both IPv4 and IPv6 pass through TUN |
+
+For full dual-stack support, remove the AAAA-suppression rule, choose a dual-stack DNS strategy, add a TUN IPv6 address, and add an explicit FakeIP IPv6 range (for example `2001:2::/48`) if using FakeIP.

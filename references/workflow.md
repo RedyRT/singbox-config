@@ -1,11 +1,11 @@
-# Generation Workflow
+# Generation Workflow (sing-box 1.14.4)
 
 This file defines the question-and-answer flow, defaults, and summary format for generating sing-box client configurations.
 
 ## Initial Assessment
 
 - Generation requested without node information: ask for the generation option first.
-- Node information provided without a generation option: parse the nodes and use the default `1.13 TUN RealIP` and the template's built-in default rules.
+- Node information provided without a generation option: parse the nodes and use the default `1.14.4 TUN RealIP` and the template's built-in default rules.
 - Both node information and a generation option provided: do not ask for the option again.
 - Routing/rule requirements provided: enter the custom rules flow.
 - Modifying an existing configuration: do not launch the full wizard; ask only for information missing for the current change.
@@ -26,27 +26,19 @@ If the user has only requested generation, ask:
 ```md
 Please select a generation option:
 
-1. `1.13 TUN RealIP` (default)
+1. `1.14.4 TUN RealIP` (default)
    Configuration for the current default stable release, prioritizing compatibility and suitable for most users.
 
-2. `1.13 TUN FakeIP`
-   Uses the stable release's FakeIP template, suitable for users who need more deterministic domain recovery or legacy FakeIP behavior.
+2. `1.14.4 TUN FakeIP`
+   Uses the stable release's FakeIP template, for users who need more deterministic domain recovery.
 
-3. `1.14 TUN`
-   Uses preview fields from 1.14; after selection, ask whether to use RealIP or FakeIP.
-
-4. `Custom`
-   Manually select the version, operating mode, DNS, IPv6, Clash API, selectors, rules, etc.
+3. `Custom`
+   Select the operating mode, DNS, IPv6, Clash API, selectors, and rules for 1.14.4.
 ```
-
-After `1.14 TUN` is selected, ask:
-
-- `RealIP` (default, compatibility first)
-- `FakeIP` (routing determinism first; not recommended solely for DNS latency)
 
 After `Custom` is selected, ask:
 
-- Version: `1.14` / `1.13`
+- Target version: fixed at `1.14.4`; do not ask for a version choice.
 - Operating mode: `TUN/VPN` / `system proxy` / `manual mixed/socks/http`
 - Configuration level: `Recommended defaults` / `Advanced customization`
 
@@ -60,7 +52,7 @@ Please paste node information: Clash YAML, sharing links, subscription links, si
 
 ## Recommended Defaults
 
-- Version: `1.13`
+- Version: `1.14.4`
 - Operating mode: TUN/VPN
 - IPv6: IPv4-only
 - Clash API: enabled
@@ -69,9 +61,9 @@ Please paste node information: Clash YAML, sharing links, subscription links, si
 - Routing rules: template's built-in default rules
 - Output: return JSON directly
 
-1.13 TUN defaults to RealIP. Version 1.13 already supports `dns.reverse_mapping`, which RealIP requires, but cannot use `dns.optimistic` / `store_dns`, which are available only in 1.14. The default template reduces cold queries and DNS pollution risks through domestic/overseas DNS routing, ordinary DNS caching, `independent_cache`, and `store_rdrc`.
+1.14.4 TUN defaults to RealIP with `dns.reverse_mapping`, optimistic caching, persistent DNS cache, and explicit remote DNS rules for overseas/proxied domains. FakeIP is not the first choice for DNS latency optimization. Both variants explicitly suppress AAAA queries for the IPv4-only default.
 
-1.14 TUN defaults to RealIP. FakeIP is not the first choice for DNS latency optimization.
+Use `references/templates/config-1.14.4-tun-realip.json` or `references/templates/config-1.14.4-tun-fakeip.json`. Replace the placeholder node with the user's outbounds and update every selector and URLTest member. For custom system-proxy/manual modes, adapt the RealIP structure using `references/network-modes.md`.
 
 ## Custom Rule Triggers
 
@@ -107,11 +99,11 @@ A summary must be shown before generation. If the user has explicitly requested 
 
 ```md
 The configuration will be generated with the following selections:
-- Generation option: 1.13 TUN RealIP
+- Generation option: 1.14.4 TUN RealIP
 - Nodes: 3 outbounds recognized
 - Routing rules: template's built-in default rules
 - IPv6: IPv4-only
 - Clash API: enabled
 - Service selectors: enabled
-- Defaults applied: no generation option selected; using the default 1.13 TUN RealIP
+- Defaults applied: no generation option selected; using the default 1.14.4 TUN RealIP
 ```

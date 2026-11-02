@@ -1,8 +1,8 @@
-# DNS、RealIP、FakeIP 与 IPv6
+# DNS, RealIP, FakeIP, and IPv6
 
 ## DNS hijack
 
-TUN 模板前两条 route rule 必须是：
+The first two route rules in TUN templates must be:
 
 ```json
 { "action": "sniff" },
@@ -14,102 +14,102 @@ TUN 模板前两条 route rule 必须是：
 }
 ```
 
-不先 `sniff`，协议检测尚未运行。仅用 `"protocol": "dns"` 会漏掉部分 UDP DNS；结合 `port: 53` 才能稳定捕获。
+Without `sniff` first, protocol detection has not yet run. Using only `"protocol": "dns"` misses some UDP DNS traffic; combine it with `port: 53` for reliable capture.
 
-## RealIP 模板
+## RealIP Templates
 
-RealIP 模板使用真实 DNS 响应。设置 `dns.reverse_mapping: true` 后，DNS router 会把非 FakeIP 的 A/AAAA 响应按 TTL 写入 `真实 IP -> domain` 内存映射。连接进入路由时，先查 FakeIP；未命中时查 reverse mapping，再结合 sniff 得到域名规则语义。
+RealIP templates use real DNS responses. With `dns.reverse_mapping: true`, the DNS router stores non-FakeIP A/AAAA responses in an in-memory `real IP -> domain` mapping according to their TTL. When a connection enters routing, FakeIP is checked first; on a miss, reverse mapping is checked and combined with sniffing to support domain-rule matching.
 
-1.13 已支持 RealIP 所需的 `dns.reverse_mapping`，因此 1.13 RealIP TUN 可以作为默认稳定模板。1.14 RealIP 是前瞻增强模板，优势是可使用 `dns.optimistic`、`store_dns`、HTTP client 和新的 DNS rule 能力。
+1.13 already supports the `dns.reverse_mapping` required for RealIP, so 1.13 RealIP TUN can serve as the default stable template. 1.14 RealIP is an enhanced preview template, offering `dns.optimistic`, `store_dns`, HTTP clients, and new DNS rule capabilities.
 
-`reverse_mapping` 不会校验或纠正 DNS 响应，也不会防止污染；如果海外域名被国内 DNS 返回污染 IP，它只会记录这个污染 IP 的映射。RealIP 模板要避免海外域名 DNS 污染，必须在 DNS rules 中把明确代理/海外 rule-set 路由到 remote DNS。
+`reverse_mapping` does not validate or correct DNS responses, nor prevent poisoning. If domestic DNS returns a poisoned IP for an overseas domain, it simply records that poisoned IP's mapping. To avoid DNS poisoning for overseas domains, RealIP templates must route explicitly proxied/overseas rule-sets to remote DNS in their DNS rules.
 
-优势：
+Advantages:
 
-- 应用拿真实 IP。
-- 浏览器、系统缓存、抓包和日志语义自然。
-- 适合大多数 TUN 和浏览器场景。
+- Applications receive real IP addresses.
+- Browser behavior, system caches, packet captures, and logs retain natural semantics.
+- Suitable for most TUN and browser scenarios.
 
-代价：
+Trade-offs:
 
-- 真实 IP 可能被多个域名共享。
-- 映射随 TTL 过期。
-- ECH、非 TLS、不可 sniff 流量会降低域名归因确定性。
+- Multiple domains may share a real IP address.
+- Mappings expire according to TTL.
+- ECH, non-TLS traffic, and traffic that cannot be sniffed reduce domain-attribution certainty.
 
-## FakeIP 模板
+## FakeIP Templates
 
-FakeIP 模板在 DNS 阶段返回 fake IP，并保存 `fake IP <-> domain` 专用映射。连接进入路由时，如果目标 IP 属于 fake IP 范围，route 可直接反查回域名。
+FakeIP templates return fake IP addresses during DNS resolution and maintain a dedicated `fake IP <-> domain` mapping. When a connection enters routing, if the destination IP is within the fake IP range, routing can look up the domain directly.
 
-优势：
+Advantages:
 
-- 连接阶段域名恢复更确定。
-- 可减少应用侧 DNS 等待，因为 A/AAAA 查询直接返回 fake IP。
+- More deterministic domain recovery at connection time.
+- Can reduce application-side DNS waiting because A/AAAA queries immediately return fake IP addresses.
 
-代价：
+Trade-offs:
 
-- 可能触发浏览器 Local Network Access。
-- 可能污染 Service Worker / 浏览器缓存。
-- 映射缺失会导致 `missing fakeip record`。
-- 规则变更后旧映射可能残留。
-- ping/traceroute/日志 IP 语义失真。
+- May trigger browser Local Network Access checks.
+- May contaminate Service Worker / browser caches.
+- Missing mappings cause `missing fakeip record`.
+- Old mappings may persist after rule changes.
+- IP semantics in ping/traceroute/logs become misleading.
 
-FakeIP 不会消除真实解析：proxy outbound 通常把域名交给远端代理解析；direct outbound 仍需本地解析。若主要诉求只是 DNS 延迟，1.14 优先使用 `dns.optimistic`、`store_dns` 和缓存策略；1.13 不支持这些新字段时，优先使用普通 DNS cache、规则简化或浏览器专用 mixed/socks/http inbound。
+FakeIP does not eliminate real resolution: proxy outbounds usually pass the domain to the remote proxy for resolution; direct outbounds still need local resolution. If DNS latency is the only main concern, prioritize `dns.optimistic`, `store_dns`, and caching strategies in 1.14. Since 1.13 does not support these new fields, prefer ordinary DNS caching, simpler rules, or a browser-specific mixed/socks/http inbound.
 
-## FakeIP 生命周期
+## FakeIP Lifecycle
 
-1. 应用查询 `example.com` 的 A/AAAA。
-2. DNS 规则匹配 `fakeip-dns`。
-3. FakeIP transport 返回假 IP，不做真实 DNS 查询。
-4. 应用连接假 IP。
-5. 路由器检测目标在 fake IP 范围内，反查回域名。
-6. 路由规则按域名匹配，选择出站。
-7. 出站阶段才按出站类型决定是否真实解析。
+1. An application queries A/AAAA records for `example.com`.
+2. A DNS rule selects `fakeip-dns`.
+3. The FakeIP transport returns a fake IP without a real DNS query.
+4. The application connects to the fake IP.
+5. The router detects that the destination is in the fake IP range and looks up the domain.
+6. Routing rules match the domain and select an outbound.
+7. Only at the outbound stage does the outbound type determine whether real resolution is needed.
 
-| 出站类型 | DNS 行为 |
+| Outbound type | DNS behavior |
 |----------|----------|
-| proxy | 通常把域名发给远端代理，本地不解析 |
-| direct | 必须本地解析，使用 outbound `domain_resolver` 或 route `default_domain_resolver` |
-| socks4 | 协议不支持 FQDN，必须本地解析 |
+| proxy | Usually sends the domain to the remote proxy without local resolution |
+| direct | Must resolve locally using outbound `domain_resolver` or route `default_domain_resolver` |
+| socks4 | The protocol does not support FQDNs; local resolution is required |
 
-## DNS 规则默认形态
+## Default DNS Rule Structure
 
-RealIP 模板默认：
+RealIP template defaults:
 
-- hosts 优先。
-- 国内域名走 `alidns`。
-- 明确代理域名走 remote DNS。
-- final 默认国内 DNS。
+- hosts takes priority.
+- Domestic domains use `alidns`.
+- Explicitly proxied domains use remote DNS.
+- final defaults to domestic DNS.
 
-FakeIP 模板默认：
+FakeIP template defaults:
 
-- 国内域名走真实国内 DNS。
-- 其它 A/AAAA 可走 `fakeip-dns`。
-- `experimental.cache_file.store_fakeip: true` 必须开启。
+- Domestic domains use real domestic DNS.
+- Other A/AAAA queries can use `fakeip-dns`.
+- `experimental.cache_file.store_fakeip: true` must be enabled.
 
-## IPv6 默认策略
+## Default IPv6 Strategy
 
-默认使用 IPv4-only：
+Use IPv4-only by default:
 
 ```json
 "strategy": "ipv4_only"
 ```
 
-除非用户确认真实网络 IPv6 可用并要求完整 IPv6 TUN，否则不要给 TUN inbound 配 IPv6 地址：
+Unless the user confirms that IPv6 works on the actual network and requests full IPv6 TUN support, do not assign an IPv6 address to the TUN inbound:
 
 ```json
 "address": "172.19.0.1/30"
 ```
 
-不要在 IPv6 不通的网络上使用：
+Do not use this on networks without working IPv6:
 
 ```json
 "address": ["172.19.0.1/30", "fdfe:dcba:9876::1/126"]
 ```
 
-原因：TUN 配 IPv6 地址后，系统会认为 IPv6 可用。微信等应用可能通过 HTTPDNS 获取 IPv6 地址并绕过 sing-box DNS 模块，随后连接原始 IPv6 IP，导致 `no route to host` 且不稳定回退 IPv4。
+Reason: assigning an IPv6 address to TUN makes the system consider IPv6 available. Applications such as WeChat may obtain IPv6 addresses through HTTPDNS, bypass the sing-box DNS module, and then connect to the raw IPv6 address, causing `no route to host` and unreliable IPv4 fallback.
 
-| 网络环境 | TUN 地址 | 行为 |
+| Network environment | TUN addresses | Behavior |
 |----------|----------|------|
-| 仅 IPv4 | 仅 IPv4 | 所有流量经 TUN，应用原生回退 IPv4 |
-| IPv4 + IPv6 | 仅 IPv4 | IPv4 经 TUN，IPv6 绕过 TUN |
-| IPv4 + IPv6 | IPv4 + IPv6 | IPv4/IPv6 都经 TUN |
+| IPv4 only | IPv4 only | All traffic passes through TUN; applications fall back to IPv4 natively |
+| IPv4 + IPv6 | IPv4 only | IPv4 passes through TUN; IPv6 bypasses TUN |
+| IPv4 + IPv6 | IPv4 + IPv6 | Both IPv4 and IPv6 pass through TUN |

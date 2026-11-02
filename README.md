@@ -2,55 +2,55 @@
 
 [English](README.en.md)
 
-`singbox-config` 是一个用于生成、迁移和排查 sing-box 客户端配置的 Codex skill。它聚焦客户端场景，包括 TUN/VPN、system proxy、SFM/SFA/SFI 图形客户端、命令行 `sing-box run`、DNS 分流、远程规则集、Clash API selector，以及常见代理节点转换。
+`singbox-config` is a Codex skill for generating, migrating, and troubleshooting sing-box client configuration files. It focuses on client-side use cases, including TUN/VPN, system proxy, SFM/SFA/SFI graphical clients, command-line `sing-box run`, DNS routing, remote rule sets, Clash API selectors, and common proxy node conversion.
 
-## 版本策略
+## Version Strategy
 
-生成配置前按版本号倒序选择目标版本：
+Before generating a configuration, choose the target version in descending version order:
 
-| 版本 | 默认状态 | 模板 |
+| Version | Default status | Template |
 | --- | --- | --- |
-| `1.14` | 可选 | `references/templates/config-1.14-tun-realip.json` 或 `references/templates/config-1.14-tun-fakeip.json` |
-| `1.13` | 默认 | `references/templates/config-1.13-tun.json` 或 `references/templates/config-1.13-tun-fakeip.json` |
+| `1.14` | Optional | `references/templates/config-1.14-tun-realip.json` or `references/templates/config-1.14-tun-fakeip.json` |
+| `1.13` | Default | `references/templates/config-1.13-tun.json` or `references/templates/config-1.13-tun-fakeip.json` |
 
-截至 2026-07-03，默认版本为 `1.13`。当 1.14 成为默认稳定版本时，只需要更新版本表和默认模板指向。
+As of 2026-07-03, the default version is `1.13`. When 1.14 becomes the default stable version, only the version table and default template pointer need to be updated.
 
-## TUN 模板
+## TUN Templates
 
-- `1.13 RealIP 模板（默认，兼容性优先）`：当前默认稳定版模板。应用拿真实 IP，浏览器、系统缓存和调试工具语义更自然；通过 DNS hijack、`dns.reverse_mapping: true` 和 sniff 支持多出口域名分流。代理/海外域名必须有 remote DNS rule，否则 `dns.final` 为国内 DNS 时仍可能污染。
-- `1.13 FakeIP 模板（分流确定性优先）`：保留给需要更确定域名恢复或 legacy FakeIP 行为的用户，不作为默认。
-- `1.14 RealIP 模板（前瞻增强）`：使用 `dns.optimistic`、`store_dns`、HTTP client 和 1.14 DNS rule 新能力；RealIP 并非 1.14 才支持。
-- `1.14 FakeIP 模板（分流确定性优先）`：用于需要更确定地从连接 IP 恢复域名的场景。它可能降低应用侧 DNS 等待，但不是首选 DNS 延迟优化方案；使用前需要接受浏览器 LNA、Service Worker/缓存污染、映射缺失和调试失真等副作用。
+- `1.13 RealIP template (default, compatibility first)`: the current default stable template. Applications receive real IPs, which keeps browser, system cache, and debugging tool semantics more natural. It supports multi-outbound domain routing through DNS hijack, `dns.reverse_mapping: true`, and sniffing. Proxied/overseas domains must have remote DNS rules; otherwise, when `dns.final` is a domestic DNS server, answers may still be polluted.
+- `1.13 FakeIP template (routing determinism first)`: kept for users who need more deterministic domain recovery or legacy FakeIP behavior. It is not the default.
+- `1.14 RealIP template (preview enhancement)`: uses `dns.optimistic`, `store_dns`, HTTP client, and new 1.14 DNS rule capabilities. RealIP itself is not new in 1.14.
+- `1.14 FakeIP template (routing determinism first)`: for cases that require more deterministic recovery of domains from connection IPs. It may reduce application-side DNS waiting time, but it is not the first-choice DNS latency optimization. Before using it, users must accept side effects such as browser LNA, Service Worker/cache pollution, missing mappings, and distorted debugging results.
 
-## DNS final 策略
+## DNS final Policy
 
-`dns.final` 是 DNS 阶段的默认 DNS server，不会跟随 route `final` 或 Clash API selector 当前选择。默认 RealIP 模板使用 `dns.final: alidns`，并通过 `clash_mode` 和海外/代理域名 DNS rules 将明确代理域名送到 remote DNS。不要用 selector 状态动态决定 `dns.final`。
+`dns.final` is the default DNS server for the DNS stage. It does not follow route `final` or the current Clash API selector choice. The default RealIP template uses `dns.final: alidns`, while `clash_mode` and overseas/proxied-domain DNS rules send explicitly proxied domains to remote DNS. Do not derive `dns.final` dynamically from selector state.
 
-## 文件结构
+## File Structure
 
-- `SKILL.md`：skill 入口说明和执行规则。
-- `references/config-schema.md`：配置字段参考和版本兼容矩阵。
-- `references/cookbook.md`：RealIP/FakeIP、DNS、路由和 TUN 机制说明。
-- `references/template.json`：当前默认模板，现等价于 `references/templates/config-1.13-tun.json`。
-- `references/templates/`：版本化配置模板。
+- `SKILL.md`: skill entrypoint instructions and operating rules.
+- `references/config-schema.md`: configuration field reference and version compatibility matrix.
+- `references/cookbook.md`: explanations of RealIP/FakeIP, DNS, routing, and TUN mechanics.
+- `references/template.json`: current default template, currently equivalent to `references/templates/config-1.13-tun.json`.
+- `references/templates/`: versioned configuration templates.
 
-## 验证
+## Verification
 
-模板应至少通过 JSON 语法检查：
+Templates should at least pass JSON syntax validation:
 
 ```bash
 jq empty references/template.json references/templates/*.json
 ```
 
-改动版本字段时，还应检查：
+When changing version-specific fields, also check:
 
-- 1.13 RealIP 模板必须包含 `dns.reverse_mapping: true`，且不得包含 FakeIP DNS server 或 `store_fakeip`。
-- 1.13 FakeIP 模板必须包含 FakeIP DNS server、A/AAAA FakeIP 规则和 `cache_file.store_fakeip: true`。
-- 1.13 模板不得包含 `optimistic`、`store_dns`、`http_client`、`preferred_by`、`default_http_client`、`http_clients`。
-- 1.14 模板不得包含 `independent_cache`、`store_rdrc`、`download_detour`。
-- 1.14 RealIP 模板必须包含 `dns.reverse_mapping: true`，且不得包含 FakeIP DNS server 或 `store_fakeip`。
-- 1.14 FakeIP 模板必须包含 FakeIP DNS server、A/AAAA FakeIP 规则和 `cache_file.store_fakeip: true`。
+- The 1.13 RealIP template must contain `dns.reverse_mapping: true` and must not contain a FakeIP DNS server or `store_fakeip`.
+- The 1.13 FakeIP template must contain a FakeIP DNS server, A/AAAA FakeIP rules, and `cache_file.store_fakeip: true`.
+- 1.13 templates must not contain `optimistic`, `store_dns`, `http_client`, `preferred_by`, `default_http_client`, or `http_clients`.
+- 1.14 templates must not contain `independent_cache`, `store_rdrc`, or `download_detour`.
+- The 1.14 RealIP template must contain `dns.reverse_mapping: true` and must not contain a FakeIP DNS server or `store_fakeip`.
+- The 1.14 FakeIP template must contain a FakeIP DNS server, A/AAAA FakeIP rules, and `cache_file.store_fakeip: true`.
 
-## 范围
+## Scope
 
-本 skill 只覆盖 sing-box 客户端配置。不覆盖服务端 inbound、服务端 TLS/ACME/Reality、透明代理网关服务端部署等场景。
+This skill only covers sing-box client configuration. It does not cover scenarios such as server-side inbounds, server-side TLS/ACME/Reality, or transparent proxy gateway server deployment.

@@ -1,42 +1,42 @@
-# 网络模式与平台行为
+# Network Modes and Platform Behavior
 
-## 模式选择
+## Mode Selection
 
-| 模式 | 适用场景 | 限制 |
+| Mode | Use case | Limitations |
 |------|----------|------|
-| TUN/VPN | 默认。捕获所有 IP 流量，适合 SFM/SFA/SFI 和桌面全局代理 | 命令行创建 TUN 通常需要权限 |
-| system proxy | mixed inbound + `set_system_proxy`，适合命令行轻量代理 | 只捕获遵循系统代理的应用；应用 DNS 不由 sing-box 控制 |
-| manual mixed/socks/http | 浏览器或单应用手动设置代理 | 只影响显式配置代理的应用 |
+| TUN/VPN | Default. Captures all IP traffic; suitable for SFM/SFA/SFI and desktop-wide proxying | Creating TUN from the command line usually requires elevated privileges |
+| system proxy | mixed inbound + `set_system_proxy`; suitable for lightweight command-line proxying | Captures only applications that honor the system proxy; application DNS is not controlled by sing-box |
+| manual mixed/socks/http | Manually configure a proxy in a browser or individual application | Affects only applications explicitly configured to use the proxy |
 
-系统代理和 manual mixed/http 不使用 FakeIP 作为核心路径，因为应用 DNS 不由 TUN 劫持。
+System proxy and manual mixed/http modes do not use FakeIP as their core path because application DNS is not hijacked by TUN.
 
-## 平台说明
+## Platform Notes
 
 ### macOS (SFM) / Android (SFA) / iOS (SFI)
 
-- 通过 Network Extension / VPN API 实现 VPN，无需 root。
-- 默认只需要 TUN inbound；VPN 模式捕获浏览器 HTTP/HTTPS。
-- `auto_detect_interface: true` 防止路由循环。
-- `stack: "mixed"` 兼容性最好。
-- 同一 TUN 配置可跨 SFM/SFA/SFI 使用。
+- VPN is implemented through Network Extension / VPN APIs, without root access.
+- Only a TUN inbound is needed by default; VPN mode captures browser HTTP/HTTPS traffic.
+- `auto_detect_interface: true` prevents routing loops.
+- `stack: "mixed"` provides the best compatibility.
+- The same TUN configuration can be used across SFM/SFA/SFI.
 
-SFM 仅在配置包含 `platform.http_proxy.enabled: true` 且偏好设置允许时设置系统代理。
+SFM sets the system proxy only when the configuration contains `platform.http_proxy.enabled: true` and preferences allow it.
 
 ## `set_system_proxy` vs `platform.http_proxy`
 
 | | `set_system_proxy` | `platform.http_proxy` |
 |---|---|---|
-| 配置位置 | mixed/http inbound 字段 | TUN inbound 的 `platform` 块 |
-| 实现 | 调用系统代理设置接口 | 通过 VPN API 设置代理 |
-| 适用场景 | 命令行 `sing-box run` | SFM/SFA/SFI 图形客户端 |
-| 依赖 TUN | 不依赖 | 必须有 TUN inbound |
-| 命令行可用 | 可用 | 不应依赖 CLI 生效；主要由图形客户端 PlatformInterface 消费 |
+| Configuration location | mixed/http inbound field | TUN inbound's `platform` block |
+| Implementation | Calls the system proxy settings API | Sets the proxy through the VPN API |
+| Use case | Command-line `sing-box run` | SFM/SFA/SFI GUI clients |
+| TUN dependency | None | Requires a TUN inbound |
+| Command-line support | Supported | Do not rely on it taking effect in the CLI; primarily consumed by GUI clients' PlatformInterface |
 
-`platform.http_proxy` 不是代理服务器；它只告诉系统代理地址。实际代理服务器仍由 mixed/http inbound 提供。使用 `platform.http_proxy` 时必须同时添加 mixed/http inbound。
+`platform.http_proxy` is not a proxy server; it only tells the system the proxy address. The actual proxy server is still provided by a mixed/http inbound. When using `platform.http_proxy`, also add a mixed/http inbound.
 
-## system proxy 最小结构
+## Minimal System Proxy Structure
 
-system proxy 配置使用 mixed inbound，不包含 TUN inbound、DNS hijack 或 FakeIP：
+A system proxy configuration uses a mixed inbound, without a TUN inbound, DNS hijacking, or FakeIP:
 
 ```json
 {
@@ -56,14 +56,14 @@ system proxy 配置使用 mixed inbound，不包含 TUN inbound、DNS hijack 或
 }
 ```
 
-v1.13 remote rule-set 可使用 `download_detour`。v1.14 system proxy 配置应使用 `http_clients` + `route.default_http_client` 或 per-rule-set `http_client`。
+v1.13 remote rule-sets can use `download_detour`. v1.14 system proxy configurations should use `http_clients` + `route.default_http_client` or per-rule-set `http_client`.
 
-## 可选 `platform.http_proxy`
+## Optional `platform.http_proxy`
 
-默认不需要。仅在以下场景添加：
+Not needed by default. Add it only in these scenarios:
 
-- 特定应用只认系统 HTTP 代理，不走 TUN 路由。
-- 需要 Apple 图形客户端支持的 `bypass_domain` / `match_domain`。
+- A specific application honors only the system HTTP proxy and does not use TUN routing.
+- You need `bypass_domain` / `match_domain` support provided by Apple GUI clients.
 
 ```json
 "platform": {
@@ -77,7 +77,7 @@ v1.13 remote rule-set 可使用 `download_detour`。v1.14 system proxy 配置应
 }
 ```
 
-同时添加：
+Also add:
 
 ```json
 { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 2080 }

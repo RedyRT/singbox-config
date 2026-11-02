@@ -1,10 +1,10 @@
-# 节点转换参考
+# Node Conversion Reference
 
-将 Clash YAML、V2Ray 分享信息或手工协议参数转换为 sing-box outbound 时使用本文件。
+Use this file when converting Clash YAML, V2Ray share information, or manually supplied protocol parameters to sing-box outbounds.
 
-## 通用字段映射
+## Common Field Mappings
 
-| Clash / 通用字段 | sing-box |
+| Clash / Common field | sing-box |
 |------------------|----------|
 | `server` / `port` | `"server"` / `"server_port"` |
 | `tls: true` | `"tls": { "enabled": true }` |
@@ -20,7 +20,7 @@
 | `ws-opts.headers.Host` | `"transport.headers": { "Host": ["..."] }` |
 | `grpc-opts.grpc-service-name` | `"transport.service_name"` |
 
-IP 格式服务器地址不需要 `domain_resolver`。
+Server addresses specified as IP addresses do not need `domain_resolver`.
 
 ## VLESS
 
@@ -60,7 +60,7 @@ IP 格式服务器地址不需要 `domain_resolver`。
 }
 ```
 
-Clash `cipher` 映射到 sing-box `security`。`alter_id` 默认 0；非 0 是旧式 AEAD 前配置。
+Clash `cipher` maps to sing-box `security`. `alter_id` defaults to 0; a nonzero value indicates a legacy pre-AEAD configuration.
 
 ## Shadowsocks
 
@@ -75,7 +75,7 @@ Clash `cipher` 映射到 sing-box `security`。`alter_id` 默认 0；非 0 是�
 }
 ```
 
-Clash `plugin: obfs` 映射为 `"plugin": "obfs-local"` 和 `"plugin_opts": "obfs=http;obfs-host=..."`。
+Clash `plugin: obfs` maps to `"plugin": "obfs-local"` and `"plugin_opts": "obfs=http;obfs-host=..."`.
 
 ## Trojan
 
@@ -106,7 +106,7 @@ Clash `plugin: obfs` 映射为 `"plugin": "obfs-local"` 和 `"plugin_opts": "obf
 }
 ```
 
-Clash `auth` 映射到 sing-box `password`。
+Clash `auth` maps to sing-box `password`.
 
 ## TUIC
 
@@ -163,4 +163,4 @@ Clash `auth` 映射到 sing-box `password`。
 }
 ```
 
-普通 AnyTLS outbound 至少需要 `server`、`server_port`、`password` 和 `tls`。`padding_scheme` 属于 inbound/user 相关场景，不作为普通 outbound 必填字段。
+A standard AnyTLS outbound requires at least `server`, `server_port`, `password`, and `tls`. `padding_scheme` applies to inbound/user-related scenarios and is not a required field for a standard outbound.

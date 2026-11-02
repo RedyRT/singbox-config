@@ -1,6 +1,6 @@
 # singbox-config
 
-[中文](README.md)
+[Main README](README.md)
 
 `singbox-config` is a Codex skill for generating, migrating, and troubleshooting sing-box client configuration files. It focuses on client-side use cases, including TUN/VPN, system proxy, SFM/SFA/SFI graphical clients, command-line `sing-box run`, DNS routing, remote rule sets, Clash API selectors, and common proxy node conversion.
 

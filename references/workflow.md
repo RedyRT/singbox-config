@@ -1,117 +1,117 @@
-# 生成工作流
+# Generation Workflow
 
-本文件定义 sing-box 客户端配置生成时的问答流程、默认值和摘要格式。
+This file defines the question-and-answer flow, defaults, and summary format for generating sing-box client configurations.
 
-## 入口判断
+## Initial Assessment
 
-- 只有生成意图、没有节点信息：先询问生成方案。
-- 已提供节点信息、没有方案：解析节点，使用默认 `1.13 TUN RealIP` 和模板内置默认规则。
-- 已提供节点信息和方案：不要重复询问方案。
-- 已提供分流/规则诉求：进入自定义规则流程。
-- 修改已有配置：不要启动完整向导，只询问当前变更缺失的信息。
-- 节点格式无法识别：只询问节点格式或缺失协议字段，不展开其它问题。
+- Generation requested without node information: ask for the generation option first.
+- Node information provided without a generation option: parse the nodes and use the default `1.13 TUN RealIP` and the template's built-in default rules.
+- Both node information and a generation option provided: do not ask for the option again.
+- Routing/rule requirements provided: enter the custom rules flow.
+- Modifying an existing configuration: do not launch the full wizard; ask only for information missing for the current change.
+- Unrecognized node format: ask only about the node format or missing protocol fields; do not expand into other questions.
 
-节点信息包括 Clash YAML、sing-box outbound JSON、代理分享链接、订阅链接或手工协议参数。
+Node information includes Clash YAML, sing-box outbound JSON, proxy sharing links, subscription links, or manually specified protocol parameters.
 
-## 交互策略
+## Interaction Strategy
 
-如果当前运行时支持结构化选择控件且允许使用，优先用控件提问。否则使用简短文本问题。结构化控件只用于选择题；节点、订阅、YAML、JSON 使用普通聊天输入。
+If the current runtime supports structured selection controls and permits their use, prefer them for questions. Otherwise, use short text questions. Use structured controls only for multiple-choice questions; use ordinary chat input for nodes, subscriptions, YAML, and JSON.
 
-不要承诺任何特定 UI 形态。不要声称 skill 可以切换运行模式。
+Do not promise any specific UI format. Do not claim that the skill can switch runtime modes.
 
-## 标准生成流程
+## Standard Generation Flow
 
-如果用户只有生成意图，询问：
+If the user has only requested generation, ask:
 
 ```md
-请选择生成方案：
+Please select a generation option:
 
-1. `1.13 TUN RealIP`（默认）
-   当前默认正式版本配置，兼容性优先，适合大多数用户。
+1. `1.13 TUN RealIP` (default)
+   Configuration for the current default stable release, prioritizing compatibility and suitable for most users.
 
 2. `1.13 TUN FakeIP`
-   使用正式版本的 FakeIP 模板，适合需要更确定域名恢复或 legacy FakeIP 行为的用户。
+   Uses the stable release's FakeIP template, suitable for users who need more deterministic domain recovery or legacy FakeIP behavior.
 
 3. `1.14 TUN`
-   使用 1.14 前瞻字段；选择后继续询问 RealIP 或 FakeIP。
+   Uses preview fields from 1.14; after selection, ask whether to use RealIP or FakeIP.
 
-4. `自定义`
-   手动选择版本、运行方式、DNS、IPv6、Clash API、selector、规则等。
+4. `Custom`
+   Manually select the version, operating mode, DNS, IPv6, Clash API, selectors, rules, etc.
 ```
 
-选择 `1.14 TUN` 后继续询问：
+After `1.14 TUN` is selected, ask:
 
-- `RealIP`（默认，兼容性优先）
-- `FakeIP`（分流确定性优先；不建议仅因 DNS 延迟选择）
+- `RealIP` (default, compatibility first)
+- `FakeIP` (routing determinism first; not recommended solely for DNS latency)
 
-选择 `自定义` 后继续询问：
+After `Custom` is selected, ask:
 
-- 版本：`1.14` / `1.13`
-- 运行方式：`TUN/VPN` / `system proxy` / `手动 mixed/socks/http`
-- 配置级别：`默认推荐` / `高级自定义`
+- Version: `1.14` / `1.13`
+- Operating mode: `TUN/VPN` / `system proxy` / `manual mixed/socks/http`
+- Configuration level: `Recommended defaults` / `Advanced customization`
 
-只有用户选择 `高级自定义` 时，才展开 DNS 优化、IPv6、Clash API、服务 selector、平台包名排除、分流规则。默认推荐路径不要询问这些项目。
+Only expand into DNS optimization, IPv6, Clash API, service selectors, platform package-name exclusions, and routing rules when the user selects `Advanced customization`. Do not ask about these items in the recommended defaults path.
 
-方案确定但节点缺失时，普通文本询问：
+When the generation option is determined but nodes are missing, ask in plain text:
 
 ```md
-请粘贴节点信息：Clash YAML、分享链接、订阅链接、sing-box outbound JSON 或手工协议参数均可。
+Please paste node information: Clash YAML, sharing links, subscription links, sing-box outbound JSON, or manually specified protocol parameters are all accepted.
 ```
 
-## 默认推荐
+## Recommended Defaults
 
-- 版本：`1.13`
-- 运行方式：TUN/VPN
-- IPv6：IPv4-only
-- Clash API：启用
-- 服务 selector：启用
-- 平台包名排除：不启用
-- 分流规则：模板内置默认规则
-- 输出：直接返回 JSON
+- Version: `1.13`
+- Operating mode: TUN/VPN
+- IPv6: IPv4-only
+- Clash API: enabled
+- Service selectors: enabled
+- Platform package-name exclusions: disabled
+- Routing rules: template's built-in default rules
+- Output: return JSON directly
 
-1.13 TUN 默认选择 RealIP。1.13 已支持 RealIP 所需的 `dns.reverse_mapping`，但不能使用 1.14 才有的 `dns.optimistic` / `store_dns`。默认模板通过国内外 DNS 分流、普通 DNS cache、`independent_cache` 和 `store_rdrc` 降低冷查询和污染风险。
+1.13 TUN defaults to RealIP. Version 1.13 already supports `dns.reverse_mapping`, which RealIP requires, but cannot use `dns.optimistic` / `store_dns`, which are available only in 1.14. The default template reduces cold queries and DNS pollution risks through domestic/overseas DNS routing, ordinary DNS caching, `independent_cache`, and `store_rdrc`.
 
-1.14 TUN 默认选择 RealIP。FakeIP 不作为 DNS 延迟优化首选。
+1.14 TUN defaults to RealIP. FakeIP is not the first choice for DNS latency optimization.
 
-## 自定义规则触发
+## Custom Rule Triggers
 
-默认不单独询问规则方案，直接使用模板内置规则。只有以下情况进入规则问答：
+By default, do not ask separately about a rule scheme; use the template's built-in rules directly. Enter the rule question-and-answer flow only in the following cases:
 
-- 用户选择 `自定义 -> 高级自定义 -> 分流规则`
-- 用户主动提到“分流、规则、rule、geosite、geoip、服务出口”
-- 用户要求某个服务、域名、国家/地区走特定出口
+- The user selects `Custom -> Advanced customization -> Routing rules`
+- The user explicitly mentions "traffic routing, rules, rule, geosite, geoip, service outbounds"
+- The user requests that a service, domain, or country/region use a specific outbound
 
-规则问答：
+Rule questions:
 
 ```md
-你希望如何自定义分流规则？
+How would you like to customize routing rules?
 
-1. `按服务`
-   例如 AI、Netflix、YouTube、GitHub、Apple、Telegram。
+1. `By service`
+   For example, AI, Netflix, YouTube, GitHub, Apple, or Telegram.
 
-2. `按域名`
-   例如 example.com 必须直连或必须代理。
+2. `By domain`
+   For example, example.com must connect directly or must use a proxy.
 
-3. `按国家/地区`
-   例如 US、JP、SG 走指定出口，CN 直连。
+3. `By country/region`
+   For example, US, JP, and SG use specified outbounds, while CN connects directly.
 
-4. `直接描述`
-   直接说明目标，我来匹配 rule-set 或生成显式规则。
+4. `Describe directly`
+   Simply describe your goal, and I will match a rule-set or generate explicit rules.
 ```
 
-规则细节见 `references/rule-sets.md`。
+See `references/rule-sets.md` for rule details.
 
-## 生成前摘要
+## Pre-Generation Summary
 
-生成前必须回显摘要。用户已明确要求生成时，摘要后直接生成，不额外确认。
+A summary must be shown before generation. If the user has explicitly requested generation, generate immediately after the summary without additional confirmation.
 
 ```md
-将按以下选择生成配置：
-- 方案：1.13 TUN RealIP
-- 节点：已识别 3 个 outbound
-- 分流规则：模板内置默认规则
-- IPv6：IPv4-only
-- Clash API：启用
-- 服务 selector：启用
-- 默认项：未选择方案，使用默认 1.13 TUN RealIP
+The configuration will be generated with the following selections:
+- Generation option: 1.13 TUN RealIP
+- Nodes: 3 outbounds recognized
+- Routing rules: template's built-in default rules
+- IPv6: IPv4-only
+- Clash API: enabled
+- Service selectors: enabled
+- Defaults applied: no generation option selected; using the default 1.13 TUN RealIP
 ```

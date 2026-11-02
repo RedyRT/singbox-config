@@ -3,100 +3,100 @@ name: singbox-config
 description: "Generate, modify, migrate, and debug version-aware sing-box client configuration files for v1.13 and v1.14. Covers TUN and system proxy modes for end-user devices (SFM/SFA/SFI/CLI), RealIP vs FakeIP TUN templates, DNS/routing split rules, remote rule-set downloads, Clash API selectors, and node conversion for VLESS/VMess/Shadowsocks/Trojan/Hysteria2/TUIC/ShadowTLS/AnyTLS. Use when the user mentions sing-box, singbox, SFM/SFA/SFI, TUN/system proxy setup, split routing, DNS hijack, FakeIP, selector behavior, per-app routing, network strategy, TLS fragment/ECH, proxy chaining, or asks to create, update, migrate, or troubleshoot a client config. Does not cover server-side proxy inbound setup."
 ---
 
-# sing-box 客户端配置生成器
+# sing-box Client Configuration Generator
 
-生成适用于中国用户的生产级 sing-box **客户端**配置，包含分流路由。本 skill 必须按目标版本生成配置，默认版本由版本表维护，避免跨版本字段误用导致警告、启动失败或网络完全瘫痪。
+Generate production-ready sing-box **client** configurations with split routing for users in China. This skill must generate configurations for the target version. Maintain the default version in the version table to avoid cross-version field misuse causing warnings, startup failures, or a complete loss of connectivity.
 
-**覆盖范围：** 客户端（连接到代理服务器的终端设备）— TUN/VPN、system proxy、manual mixed/socks/http、SFM/SFA/SFI 图形客户端、命令行 `sing-box run`。
+**Scope:** Clients (end-user devices connecting to proxy servers)—TUN/VPN, system proxy, manual mixed/socks/http, SFM/SFA/SFI GUI clients, and command-line `sing-box run`.
 
-**不覆盖：** 服务端配置（搭建代理服务器）、服务端 inbound 监听、服务端 TLS/ACME/Reality、透明代理网关服务端部署。服务端问题应提示本 skill 只覆盖客户端，并参考官方 inbound 文档。
+**Out of scope:** Server configurations (hosting proxy servers), server-side inbound listeners, server-side TLS/ACME/Reality, and server-side transparent proxy gateway deployments. For server questions, explain that this skill covers clients only and refer to the official inbound documentation.
 
-## Reference 路由
+## Reference Guide
 
-先按任务读取最小必要 reference，不要一次加载全部：
+Read only the references needed for the task first; do not load them all at once:
 
-| 任务 | 读取 |
+| Task | Read |
 |------|------|
-| 生成新配置、选择版本/模板、默认值、摘要格式 | `references/workflow.md` |
-| TUN、system proxy、manual mixed/http、platform.http_proxy、平台行为 | `references/network-modes.md` |
-| DNS hijack、RealIP、FakeIP、DNS 延迟、IPv6 策略 | `references/dns-routing.md` |
-| Clash/V2Ray 节点转换到 sing-box outbound | `references/node-conversion.md` |
-| geosite/geoip、rule-set URL、自定义分流规则 | `references/rule-sets.md` |
-| 字段、版本矩阵、schema 级兼容性 | `references/config-schema.md` |
-| 机制排查、连接生命周期、常见陷阱、源码验证 | `references/cookbook.md` |
-| 1.13 TUN RealIP 模板（默认） | `references/templates/config-1.13-tun.json` |
-| 1.13 TUN FakeIP 模板 | `references/templates/config-1.13-tun-fakeip.json` |
-| 1.14 TUN RealIP 模板 | `references/templates/config-1.14-tun-realip.json` |
-| 1.14 TUN FakeIP 模板 | `references/templates/config-1.14-tun-fakeip.json` |
+| New configurations, version/template selection, defaults, summary format | `references/workflow.md` |
+| TUN, system proxy, manual mixed/http, platform.http_proxy, platform behavior | `references/network-modes.md` |
+| DNS hijack, RealIP, FakeIP, DNS latency, IPv6 strategy | `references/dns-routing.md` |
+| Clash/V2Ray node conversion to sing-box outbounds | `references/node-conversion.md` |
+| geosite/geoip, rule-set URLs, custom split-routing rules | `references/rule-sets.md` |
+| Fields, version matrix, schema-level compatibility | `references/config-schema.md` |
+| Mechanism troubleshooting, connection lifecycle, common pitfalls, source-code verification | `references/cookbook.md` |
+| 1.13 TUN RealIP template (default) | `references/templates/config-1.13-tun.json` |
+| 1.13 TUN FakeIP template | `references/templates/config-1.13-tun-fakeip.json` |
+| 1.14 TUN RealIP template | `references/templates/config-1.14-tun-realip.json` |
+| 1.14 TUN FakeIP template | `references/templates/config-1.14-tun-fakeip.json` |
 
-`references/template.json` 必须等价于当前默认版本模板；截至 2026-07-03 为 `references/templates/config-1.13-tun.json`。
+`references/template.json` must be equivalent to the current default version's template; as of 2026-07-03, this is `references/templates/config-1.13-tun.json`.
 
-## 生成入口流程
+## Generation Entry Flow
 
-生成**新配置**时，读取 `references/workflow.md`，按“入口判断 + 最少问题”执行：
+When generating a **new configuration**, read `references/workflow.md` and assess the entry point with minimal questions:
 
-- 只有生成意图、无节点信息：询问生成方案。
-- 已提供节点信息、无方案：解析节点，默认使用 `1.13 TUN RealIP` 和模板内置规则。
-- 已提供节点信息和方案：不要重复询问方案。
-- 已提供分流/规则诉求：进入自定义规则流程，并按需读取 `references/rule-sets.md`。
-- 修改已有配置：不要启动完整向导，只询问当前变更缺失的信息。
-- 节点格式无法识别：只询问节点格式或缺失协议字段，不展开其它问题。
+- Generation intent only, without nodes: ask which configuration option to use.
+- Nodes provided without an option: parse them and default to `1.13 TUN RealIP` with the template's built-in rules.
+- Nodes and an option provided: do not ask for the option again.
+- Split-routing/rule requirements provided: enter the custom-rule flow and read `references/rule-sets.md` as needed.
+- Modifying an existing configuration: do not launch the full wizard; ask only for information missing for the current change.
+- Unrecognized node format: ask only about the format or missing protocol fields, without expanding into other questions.
 
-如果当前运行时支持结构化选择控件且允许使用，优先用控件提问；否则使用简短文本问题。不要在 skill 中承诺任何特定 UI 形态。
+If the runtime supports structured selection controls and permits their use, prefer them for questions; otherwise, use short text questions. Do not promise a specific UI in the skill.
 
-生成前必须回显摘要；用户已明确要求生成时，摘要后直接生成，不额外确认。
+Always present a summary before generation. If the user explicitly requested generation, generate immediately after the summary without another confirmation.
 
-## 默认值
+## Defaults
 
-- 默认方案：`1.13 TUN RealIP`（兼容性优先）
-- 默认运行方式：TUN/VPN
-- 默认 DNS/IP 策略：IPv4-only
-- `1.13 TUN` 和 `1.14 TUN` 默认模板：RealIP 模板（兼容性优先）
-- 默认规则：模板内置规则（国内直连、广告拦截、常见海外服务代理、已有服务 selector）
-- 默认启用 Clash API 和服务 selector
-- 默认不配置平台包名排除
-- 默认输出：直接返回 JSON；只有用户要求写文件时才写文件
+- Default option: `1.13 TUN RealIP` (compatibility first)
+- Default operating mode: TUN/VPN
+- Default DNS/IP strategy: IPv4-only
+- Default templates for `1.13 TUN` and `1.14 TUN`: RealIP (compatibility first)
+- Default rules: built-in template rules (direct connections for China, ad blocking, proxy routing for common overseas services, existing service selectors)
+- Clash API and service selectors enabled by default
+- No platform package-name exclusions by default
+- Default output: return JSON directly; write a file only if the user requests it
 
-如果用户主要诉求是 DNS 延迟，不要推荐 FakeIP；优先使用版本可用的 DNS 缓存/乐观缓存策略。
+If DNS latency is the main concern, do not recommend FakeIP; prioritize DNS caching/optimistic caching strategies supported by the selected version.
 
-## 版本表
+## Version Table
 
-版本选项按版本号倒序展示：
+Display version options in descending version order:
 
-| 版本 | 默认状态 | 模板 |
+| Version | Default status | Template |
 |------|----------|------|
-| `1.14` | 可选 | `config-1.14-tun-realip.json` 或 `config-1.14-tun-fakeip.json` |
-| `1.13` | **默认** | `config-1.13-tun.json` 或 `config-1.13-tun-fakeip.json` |
+| `1.14` | Optional | `config-1.14-tun-realip.json` or `config-1.14-tun-fakeip.json` |
+| `1.13` | **Default** | `config-1.13-tun.json` or `config-1.13-tun-fakeip.json` |
 
-截至 2026-07-03，默认版本为 `1.13`；1.14 按 alpha/preview 线处理。未来版本状态变化时，只更新版本表和默认模板指向，不要把“推荐”硬编码到正文其它位置。
+As of 2026-07-03, the default version is `1.13`; treat 1.14 as the alpha/preview line. When version status changes, update only the version table and default template reference; do not hard-code recommendations elsewhere in the text.
 
-## 模板选择
+## Template Selection
 
 ### 1.13 TUN RealIP
 
-默认正式版本模板。使用 `references/templates/config-1.13-tun.json`。无 FakeIP，启用 `dns.reverse_mapping: true`，并保留 1.13 可用字段如 `independent_cache`、`store_rdrc`、remote rule-set `download_detour`。
+The default stable-release template. Use `references/templates/config-1.13-tun.json`. It has no FakeIP, enables `dns.reverse_mapping: true`, and retains fields available in 1.13 such as `independent_cache`, `store_rdrc`, and remote rule-set `download_detour`.
 
-1.13 已支持 RealIP 所需的 `reverse_mapping`。1.14 的优势是 `dns.optimistic`、`store_dns`、HTTP client 与 DNS rule 新能力，不是 RealIP 从无到有。
+1.13 already supports the `reverse_mapping` required for RealIP. The advantages of 1.14 are `dns.optimistic`, `store_dns`, HTTP clients, and new DNS rule capabilities—not the introduction of RealIP support.
 
-`reverse_mapping` 只记录已返回的真实 IP -> domain，帮助路由阶段匹配域名规则；它本身不防 DNS 污染。RealIP 模板必须用 DNS rule 将明确代理/海外域名送到 remote DNS。
+`reverse_mapping` only records returned real IP -> domain mappings to help domain-rule matching during routing; it does not itself prevent DNS poisoning. RealIP templates must use DNS rules to send explicitly proxied/overseas domains to remote DNS.
 
 ### 1.13 TUN FakeIP
 
-仅在用户明确需要更确定的连接 IP -> 域名恢复或 legacy FakeIP 行为时使用。使用 `references/templates/config-1.13-tun-fakeip.json`。不要因为普通 DNS 延迟单独选择 FakeIP。
+Use only when the user explicitly needs more deterministic connection IP -> domain recovery or legacy FakeIP behavior. Use `references/templates/config-1.13-tun-fakeip.json`. Do not select FakeIP solely because of ordinary DNS latency.
 
 ### 1.14 TUN RealIP
 
-默认 1.14 TUN 模板。使用 `references/templates/config-1.14-tun-realip.json`。无 FakeIP，启用 `dns.reverse_mapping: true`、`store_dns`，并使用 1.14 HTTP client 配置。
+The default 1.14 TUN template. Use `references/templates/config-1.14-tun-realip.json`. It has no FakeIP, enables `dns.reverse_mapping: true` and `store_dns`, and uses the 1.14 HTTP client configuration.
 
 ### 1.14 TUN FakeIP
 
-仅在用户明确需要更确定的连接 IP -> 域名恢复时使用。使用 `references/templates/config-1.14-tun-fakeip.json`。不要因为普通 DNS 延迟单独选择 FakeIP。
+Use only when the user explicitly needs more deterministic connection IP -> domain recovery. Use `references/templates/config-1.14-tun-fakeip.json`. Do not select FakeIP solely because of ordinary DNS latency.
 
-## 必须遵守的硬规则
+## Mandatory Rules
 
-### 路由顺序
+### Routing Order
 
-所有 TUN 模板的路由前两条必须保持：
+The first two routing rules in every TUN template must remain:
 
 ```json
 { "action": "sniff" },
@@ -108,55 +108,55 @@ description: "Generate, modify, migrate, and debug version-aware sing-box client
 }
 ```
 
-不要只用 `"protocol": "dns"` 做 DNS 劫持；需要 `protocol dns OR port 53`。
+Do not use only `"protocol": "dns"` for DNS hijacking; use `protocol dns OR port 53`.
 
-### v1.13+ 新模板避免的 legacy/special 用法
+### Legacy/Special Usage to Avoid in New v1.13+ Templates
 
-新模板避免以下 legacy/special 用法：
+Avoid the following legacy/special usage in new templates:
 
-- `"type": "dns"` outbound；1.13 已移除，改用 `"action": "hijack-dns"`。
-- `"type": "block"` outbound；当前仍可用，但普通阻断优先用 `"action": "reject"`，只有 selector 需要一个可选阻断出站时才使用 `type: "block"`。
-- `"outbound": "any"` DNS 规则；改用 outbound `domain_resolver` 或 route `default_domain_resolver`。
+- `"type": "dns"` outbound: removed in 1.13; use `"action": "hijack-dns"` instead.
+- `"type": "block"` outbound: still available, but prefer `"action": "reject"` for ordinary blocking. Use `type: "block"` only when a selector needs a selectable blocking outbound.
+- `"outbound": "any"` DNS rules: use outbound `domain_resolver` or route `default_domain_resolver` instead.
 
-### v1.14 模板字段门控
+### v1.14 Template Field Gating
 
-1.14 模板不要使用：
+Do not use these fields in 1.14 templates:
 
 - `independent_cache`
 - `store_rdrc`
 - remote rule-set `download_detour`
 
-1.14 remote rule-set 必须显式使用 `http_client` 或 `route.default_http_client`，不要依赖隐式默认 HTTP client。
+1.14 remote rule-sets must explicitly use `http_client` or `route.default_http_client`; do not rely on an implicit default HTTP client.
 
-### IPv6 默认
+### IPv6 Defaults
 
-除非用户确认真实网络 IPv6 可用并要求完整 IPv6 TUN，否则：
+Unless the user confirms that IPv6 works on the actual network and requests full IPv6 TUN support:
 
-- DNS 使用 `"strategy": "ipv4_only"`。
-- TUN inbound 只配置 IPv4 地址。
-- 不给 TUN 配 IPv6 地址。
+- Use `"strategy": "ipv4_only"` for DNS.
+- Configure only an IPv4 address for the TUN inbound.
+- Do not assign an IPv6 address to TUN.
 
-IPv6 机制和 HTTPDNS 绕过原因见 `references/dns-routing.md`。
+See `references/dns-routing.md` for IPv6 behavior and the reasons HTTPDNS can bypass DNS handling.
 
-### 防泄漏
+### Leak Prevention
 
-在 `ip_is_private -> direct` 后拒绝 DoT 和 STUN；不要全局拒绝 UDP 443/QUIC。
+Reject DoT and STUN after `ip_is_private -> direct`; do not globally reject UDP 443/QUIC.
 
-## 路由决策原则
+## Routing Decision Principles
 
-- 从路由语义出发，不要从 DNS 语义出发。
-- 用户说“域名必须走代理”：在 CN/直连兜底规则前添加显式 route 规则；RealIP 且默认 DNS 是国内 DNS 时，同时添加 remote DNS 规则。
-- 用户说“域名必须直连”：同时添加 DNS 规则和 route 规则，放在 CN/代理兜底前。
-- 不根据站点语言、品牌或 TLD 猜测 `geosite-cn` 成员关系；需要时查官方或可信 rule-set。
-- GUI / Clash API 当前 selector 状态是运行时事实，不要假设 JSON 中 `"default"` 就是当前选择。
+- Start from routing semantics, not DNS semantics.
+- If a domain must use the proxy: add an explicit route rule before the CN/direct fallback rules. With RealIP and a domestic default DNS server, also add a remote DNS rule.
+- If a domain must connect directly: add both DNS and route rules before the CN/proxy fallback rules.
+- Do not infer `geosite-cn` membership from a site's language, brand, or TLD; consult official or trusted rule-sets when needed.
+- The current GUI / Clash API selector state is a runtime fact; do not assume the JSON `"default"` is the current selection.
 
-## 验证
+## Validation
 
-完成文档或模板变更后至少运行：
+After changing documentation or templates, run at least:
 
 ```bash
 jq empty references/template.json references/templates/*.json
 python3 /Users/shpirt/skills/.system/skill-creator/scripts/quick_validate.py /Users/shpirt/playground/singbox-config
 ```
 
-如果本机 Python 缺少 PyYAML，可用临时 `PYTHONPATH` 安装目录运行，不要把依赖写入 skill 仓库。
+If the local Python installation lacks PyYAML, run with a temporary installation directory on `PYTHONPATH`; do not add dependencies to the skill repository.

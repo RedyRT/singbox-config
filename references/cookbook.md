@@ -1,247 +1,247 @@
-# sing-box Cookbook — 工作原理与配置模式
+# sing-box Cookbook — How It Works and Configuration Patterns
 
-> 本文解释 sing-box 各组件的**执行流程和交互关系**，不是字段列表（字段列表见 config-schema.md）。
+> This document explains the **execution flow and interactions** of sing-box components; it is not a field reference (see config-schema.md for the field reference).
 
-## 1. 连接生命周期：从 TUN 到目标
+## 1. Connection Lifecycle: From TUN to the Destination
 
 ```
-App 发起连接 (e.g. curl google.com)
+App initiates a connection (e.g. curl google.com)
   │
   ▼
-① TUN 捕获 IP 包 → 创建 InboundContext (源IP/端口, 目标IP/端口)
+① TUN captures IP packets → creates InboundContext (source IP/port, destination IP/port)
   │
   ▼
-② matchRule() — 主路由引擎，按顺序遍历 route.rules
+② matchRule() — main routing engine, iterates through route.rules in order
   │
-  ├─ 查找进程信息 (process_name/path)
-  ├─ FakeIP 反查：目标 IP 在 fakeip store 中？
-  │    是 → metadata.Destination 从 IP 还原为域名，标记 FakeIP=true
-  ├─ RealIP reverse mapping：目标真实 IP 有 DNS 映射？
-  │    是 → metadata.Domain = 映射域名，供域名规则匹配
+   ├─ Looks up process information (process_name/path)
+   ├─ FakeIP reverse lookup: is the destination IP in the fakeip store?
+   │    Yes → restores metadata.Destination from IP to domain name, sets FakeIP=true
+   ├─ RealIP reverse mapping: does the real destination IP have a DNS mapping?
+   │    Yes → metadata.Domain = mapped domain name, for domain rule matching
   │
-  ├─ 遍历规则 (first-final-action-wins):
-  │    Rule 0: action=sniff → 偷看数据，识别协议/域名，【不中断，继续下一条】
-  │    Rule 1: action=hijack-dns → 匹配成功？→ 转 DNS 处理 【中断】
-  │    Rule 2: action=route → 匹配成功？→ 选定 outbound 【中断】
+   ├─ Iterates through rules (first-final-action-wins):
+   │    Rule 0: action=sniff → peeks at data, identifies protocol/domain, [does not stop; continues to the next rule]
+   │    Rule 1: action=hijack-dns → matches? → hands off to DNS processing [stops]
+   │    Rule 2: action=route → matches? → selects outbound [stops]
   │    Rule N: ...
   │
   ▼
-③ 执行 final action:
-   hijack-dns → 进入 DNS 路由（见第2节）
-   route      → 连接发送到选定 outbound
-   reject     → 返回 RST/ICMP unreachable 或静默丢弃
+③ Executes final action:
+   hijack-dns → enters DNS routing (see Section 2)
+   route      → sends the connection to the selected outbound
+   reject     → returns RST/ICMP unreachable or silently drops
 ```
 
-### 关键理解
+### Key Concepts
 
-**非终结动作 (sniff/resolve/route-options) 不中断规则遍历。** 它们修改 metadata 后继续匹配下一条规则。这意味着：
-
-```
-Rule 0: { "action": "sniff" }              ← 识别出域名 google.com
-Rule 1: { "domain": "google.com", ... }    ← 现在可以匹配域名了
-```
-
-如果 sniff 放在 domain 匹配之后，域名还没识别出来，匹配会失败。**顺序决定一切。**
-
-**终结动作 (route/reject/hijack-dns) 立即中断。** 第一个匹配的终结动作决定这条连接的命运，后续规则不再评估。
-
-### FakeIP 反查时机
-
-FakeIP 反查发生在规则遍历**之前**（matchRule 的第一步）。这意味着：
-- App 连接 198.18.0.32:443
-- matchRule 先查 fakeip store → 发现 198.18.0.32 = google.com
-- metadata.Destination 变为 google.com
-- 后续规则基于域名 google.com 匹配，而非 IP
-
-### RealIP reverse mapping 时机
-
-RealIP 模板必须设置 `dns.reverse_mapping: true`。DNS router 收到非 FakeIP 的 A/AAAA 响应后，会按 DNS TTL 写入 `真实 IP -> domain` 的内存映射。连接进入 TUN 后，如果目标 IP 不是 FakeIP，路由器会查 `LookupReverseMapping()`，命中后把域名保存到 `metadata.Domain`，后续域名规则和 sniff 结果共同参与匹配。
-
-1.13 已支持 `dns.reverse_mapping`，因此 1.13 RealIP TUN 可作为稳定默认模板。1.14 RealIP 的增强点是 `dns.optimistic`、`store_dns`、HTTP client 与 DNS rule 新能力，不是 RealIP 从无到有。
-
-RealIP 的优势是应用拿到真实 IP，浏览器、系统缓存和调试工具语义自然；弱点是一个真实 IP 可能对应多个域名，映射随 TTL 过期，且 ECH、非 TLS、不可 sniff 流量会降低域名归因确定性。`reverse_mapping` 不负责防 DNS 污染；防污染依赖 DNS rules 将代理/海外域名送到 remote DNS。
-
-## 2. DNS 查询流程
-
-DNS 查询有两个入口：
+**Non-final actions (sniff/resolve/route-options) do not stop rule iteration.** They modify metadata and then continue matching the next rule. This means:
 
 ```
-入口 A: hijack-dns（路由规则劫持）
-  App 的 DNS 查询（UDP/TCP port 53）→ 路由规则匹配 → hijack-dns → DNS 路由
-
-入口 B: domain_resolver（出站域名解析）
-  Outbound 需要解析域名 → 直接调用指定 DNS 服务器，【绕过 dns.rules】
+Rule 0: { "action": "sniff" }              ← identifies the domain google.com
+Rule 1: { "domain": "google.com", ... }    ← can now match the domain
 ```
 
-### DNS 规则匹配
+If sniff is placed after domain matching, the domain has not yet been identified and matching will fail. **Order determines everything.**
+
+**Final actions (route/reject/hijack-dns) stop iteration immediately.** The first matching final action determines the fate of the connection; subsequent rules are not evaluated.
+
+### When FakeIP Reverse Lookup Happens
+
+FakeIP reverse lookup happens **before** rule iteration (the first step of matchRule). This means:
+- The app connects to 198.18.0.32:443
+- matchRule first checks the fakeip store → finds 198.18.0.32 = google.com
+- metadata.Destination becomes google.com
+- Subsequent rules match against the domain google.com rather than the IP
+
+### When RealIP Reverse Mapping Happens
+
+RealIP templates must set `dns.reverse_mapping: true`. After receiving a non-FakeIP A/AAAA response, the DNS router writes an in-memory `real IP -> domain` mapping with the DNS TTL. When a connection enters TUN, if the destination IP is not a FakeIP, the router checks `LookupReverseMapping()` and, on a hit, saves the domain to `metadata.Domain`; subsequent domain rules and sniff results jointly participate in matching.
+
+1.13 already supports `dns.reverse_mapping`, so the 1.13 RealIP TUN template can serve as a stable default. The RealIP enhancements in 1.14 are `dns.optimistic`, `store_dns`, and new HTTP client and DNS rule capabilities, rather than the introduction of RealIP itself.
+
+The advantage of RealIP is that applications receive real IPs, giving browsers, system caches, and debugging tools natural semantics; its weaknesses are that one real IP may correspond to multiple domains, mappings expire with their TTL, and ECH, non-TLS traffic, and traffic that cannot be sniffed reduce the certainty of domain attribution. `reverse_mapping` does not prevent DNS poisoning; protection against poisoning relies on DNS rules sending proxied/overseas domains to remote DNS.
+
+## 2. DNS Query Flow
+
+DNS queries have two entry points:
 
 ```
-DNS 查询到达
+Entry A: hijack-dns (routing rule interception)
+  App DNS query (UDP/TCP port 53) → routing rule match → hijack-dns → DNS routing
+
+Entry B: domain_resolver (outbound domain resolution)
+  Outbound needs to resolve a domain → directly calls the specified DNS server, [bypasses dns.rules]
+```
+
+### DNS Rule Matching
+
+```
+DNS query arrives
   │
   ▼
-遍历 dns.rules（顺序匹配，第一个终结动作生效）:
+Iterates through dns.rules (matches in order; the first final action takes effect):
   │
-  ├─ 匹配条件: 同类字段 OR，不同类字段 AND
-  │   例: domain_suffix=["cn","com.cn"] AND query_type=["A"]
-  │   含义: (后缀是 cn 或 com.cn) 且 (查询类型是 A)
+   ├─ Match conditions: OR for fields of the same type, AND for fields of different types
+   │   Example: domain_suffix=["cn","com.cn"] AND query_type=["A"]
+   │   Meaning: (suffix is cn or com.cn) AND (query type is A)
   │
-  ├─ 动作:
-  │   route  → 发送到指定 DNS 服务器
-  │   reject → 返回 NXDOMAIN
+   ├─ Actions:
+   │   route  → sends to the specified DNS server
+   │   reject → returns NXDOMAIN
   │
-  ├─ 响应过滤 (仅 A/AAAA/HTTPS):
-  │   ip_accept_any: 响应包含任意 IP 就接受
-  │   ip_cidr: 响应 IP 在指定 CIDR 范围内才接受
-  │   ip_is_private: 响应 IP 是私有地址才接受
+   ├─ Response filtering (A/AAAA/HTTPS only):
+   │   ip_accept_any: accepts if the response contains any IP
+   │   ip_cidr: accepts only if the response IP is within the specified CIDR range
+   │   ip_is_private: accepts only if the response IP is a private address
   │
-  │   ↳ 如果响应不满足过滤条件 → 跳过此规则，继续匹配下一条
+   │   ↳ If the response does not satisfy the filter → skips this rule and continues matching the next
   │
   ▼
-无规则匹配 → 使用 dns.final 指定的服务器
+No rule matches → uses the server specified by dns.final
 ```
 
-### ip_accept_any 的真正含义
+### What ip_accept_any Really Means
 
-**它是响应过滤器，不是查询过滤器。** 执行顺序：
+**It is a response filter, not a query filter.** Execution order:
 
-1. 查询发送到 hosts 服务器
-2. hosts 返回响应（可能有 IP，可能为空）
-3. `ip_accept_any` 检查：响应中有任何 IP 吗？
-   - 有 → 接受此响应，规则匹配成功
-   - 没有 → 规则匹配失败，**继续下一条规则**
+1. The query is sent to the hosts server
+2. hosts returns a response (which may contain IPs or be empty)
+3. `ip_accept_any` checks: does the response contain any IP?
+   - Yes → accepts the response; the rule matches
+   - No → the rule does not match; **continues to the next rule**
 
-这实现了 "先查 hosts，查不到就 fallthrough" 的模式：
+This implements the "check hosts first, fall through if not found" pattern:
 ```json
 { "ip_accept_any": true, "action": "route", "server": "hosts" }
 ```
 
-### RDRC（拒绝 DNS 响应缓存）
+### RDRC (Rejected DNS Response Cache)
 
-RDRC 缓存 DNS 响应过滤器（`ip_cidr`、`ip_is_private`、`ip_accept_any`）的拒绝结果。
+RDRC caches rejection results from DNS response filters (`ip_cidr`, `ip_is_private`, `ip_accept_any`).
 
-工作流程：
-1. DNS 查询 `google.com` 匹配到 `alidns`（国内 DNS）规则
-2. alidns 返回被污染的 IP（如 `203.0.113.1`）
-3. 规则的响应过滤（如 `ip_cidr` 不匹配或 `ip_accept_any` 为空）拒绝此响应
-4. RDRC 缓存：`alidns + google.com + A → rejected`
-5. 下次 `google.com` 查询到达时，直接跳过 alidns 规则，不发送实际 DNS 请求
-6. 继续匹配下一条规则（如 fakeip 或 google-dns）
+Workflow:
+1. A DNS query for `google.com` matches the `alidns` (domestic Chinese DNS) rule
+2. alidns returns a poisoned IP (such as `203.0.113.1`)
+3. The rule's response filter (such as a non-matching `ip_cidr` or an empty result for `ip_accept_any`) rejects the response
+4. RDRC caches: `alidns + google.com + A → rejected`
+5. The next time a `google.com` query arrives, the alidns rule is skipped directly without sending an actual DNS request
+6. Matching continues with the next rule (such as fakeip or google-dns)
 
-**为什么重要：** 在 hosts fallthrough 模式（`ip_accept_any`）中，hosts 对大多数域名返回空结果 → 每次查询都要先问 hosts 再 fallthrough。RDRC 缓存空结果后，后续查询直接跳过 hosts 规则。
+**Why this matters:** In the hosts fallthrough pattern (`ip_accept_any`), hosts returns empty results for most domains → every query must ask hosts first before falling through. Once RDRC caches the empty results, subsequent queries skip the hosts rule directly.
 
-`store_rdrc: true` 将 RDRC 持久化到 cache.db，重启后不丢失。`rdrc_timeout` 默认 7 天。
+`store_rdrc: true` persists RDRC to cache.db so it survives restarts. `rdrc_timeout` defaults to 7 days.
 
-### independent_cache 的作用
+### What independent_cache Does
 
-- `false`（默认）：全局缓存，相同域名不同 DNS 服务器共享缓存
-- `true`：每个 DNS 服务器独立缓存
+- `false` (default): a global cache, shared across DNS servers for the same domain
+- `true`: a separate cache for each DNS server
 
-为什么分流场景必须 `true`：如果 google.com 先被 alidns 解析（返回污染 IP），缓存后 google-dns 也会命中这个污染结果。独立缓存避免交叉污染。
+Why split-routing scenarios require `true`: if google.com is first resolved by alidns (returning a poisoned IP), google-dns will also hit that poisoned result once cached. Independent caches prevent cross-contamination.
 
-## 3. DNS 策略 (strategy) 工作方式
+## 3. How DNS Strategy (strategy) Works
 
-strategy 同时在**查询和响应两个阶段**过滤：
+strategy filters in **both the query and response phases**:
 
-| 策略 | 查询阶段 | 响应阶段 |
+| Strategy | Query phase | Response phase |
 |------|---------|---------|
-| `ipv4_only` | 收到 AAAA 查询 → 直接返回空成功 | 只返回 A 记录 |
-| `ipv6_only` | 收到 A 查询 → 直接返回空成功 | 只返回 AAAA 记录 |
-| `prefer_ipv4` | 两种都查 | A 记录排前面 |
-| `prefer_ipv6` | 两种都查 | AAAA 记录排前面 |
+| `ipv4_only` | Receives an AAAA query → immediately returns an empty successful response | Returns only A records |
+| `ipv6_only` | Receives an A query → immediately returns an empty successful response | Returns only AAAA records |
+| `prefer_ipv4` | Queries both types | Places A records first |
+| `prefer_ipv6` | Queries both types | Places AAAA records first |
 
-`ipv4_only` 不是"丢弃 AAAA 响应"，而是根本不发 AAAA 查询，所以完全不会产生 IPv6 地址。
+`ipv4_only` does not "discard AAAA responses"; it never sends AAAA queries in the first place, so no IPv6 addresses are produced at all.
 
-## 4. FakeIP 完整生命周期
+## 4. Complete FakeIP Lifecycle
 
 ```
-① DNS 查询: google.com A?
+① DNS query: google.com A?
    │
    ▼
-② dns.rules 匹配到 fakeip 服务器
+② dns.rules matches the fakeip server
    │
    ▼
-③ FakeIP 生成:
-   - 从 inet4_range (198.18.0.0/15) 中顺序分配 IP
-   - 存储双向映射: 198.18.0.32 ↔ google.com
-   - store_fakeip=true 时持久化到 cache.db
+③ FakeIP generation:
+   - Allocates IPs sequentially from inet4_range (198.18.0.0/15)
+   - Stores a bidirectional mapping: 198.18.0.32 ↔ google.com
+   - Persists to cache.db when store_fakeip=true
    │
    ▼
-④ 返回 198.18.0.32 给 App
+④ Returns 198.18.0.32 to the app
    │
    ▼
-⑤ App 连接 198.18.0.32:443
+⑤ App connects to 198.18.0.32:443
    │
    ▼
-⑥ TUN 捕获 → matchRule():
-   - 查 fakeip store: 198.18.0.32 → google.com
-   - metadata.Destination = google.com (不再是 IP)
+⑥ TUN captures → matchRule():
+   - Looks up the fakeip store: 198.18.0.32 → google.com
+   - metadata.Destination = google.com (no longer an IP)
    - metadata.FakeIP = true
    │
    ▼
-⑦ 路由规则基于域名 google.com 匹配
+⑦ Routing rules match against the domain google.com
    │
    ▼
-⑧ Outbound 使用域名 google.com 建立连接
-   (代理协议发送域名，远端服务器解析真实 IP)
+⑧ Outbound establishes a connection using the domain google.com
+   (the proxy protocol sends the domain; the remote server resolves the real IP)
 ```
 
-### FakeIP 第 7 步：出站类型决定 DNS 解析方式（源码验证）
+### FakeIP Step 7: Outbound Type Determines DNS Resolution (Verified Against Source Code)
 
-FakeIP 反查还原域名后，路由规则选定了出站，此时真正的 DNS 解析行为因出站类型而异：
+After FakeIP reverse lookup restores the domain and routing rules select an outbound, the actual DNS resolution behavior varies by outbound type:
 
-| 出站类型 | DNS 行为 |
+| Outbound type | DNS behavior |
 |---------|---------|
-| **proxy**（vless/vmess/trojan/ss/socks5/http） | 域名原样发送给远程代理服务器。**不做本地 DNS 解析。** |
-| **direct** | 必须本地解析。优先级：1) outbound 的 `domain_resolver`，2) `route.default_domain_resolver`（回退），3) 默认 DNS transport |
+| **proxy** (vless/vmess/trojan/ss/socks5/http) | Sends the domain unchanged to the remote proxy server. **No local DNS resolution.** |
+| **direct** | Requires local resolution. Priority: 1) the outbound's `domain_resolver`, 2) `route.default_domain_resolver` (fallback), 3) the default DNS transport |
 
-**关键含义：**
-- `dns.final`（如 google-dns）在 fakeip 场景下极少使用 — 仅处理非 A/AAAA 查询（MX、TXT、SRV）
-- direct outbound 的真实 DNS 由 `route.default_domain_resolver` 控制，**不是** `dns.final`
-- proxy outbound 完全不做本地 DNS — 代理服务器负责解析
+**Key implications:**
+- `dns.final` (such as google-dns) is rarely used in fakeip scenarios — it only handles non-A/AAAA queries (MX, TXT, SRV)
+- Real DNS resolution for a direct outbound is controlled by `route.default_domain_resolver`, **not** `dns.final`
+- A proxy outbound performs no local DNS resolution at all — the proxy server handles resolution
 
-### FakeIP 缓存陷阱
+### FakeIP Cache Pitfalls
 
-`store_fakeip: true` 将映射持久化。如果你**修改了 DNS 规则让某域名绕过 fakeip**，旧的 fakeip 映射仍然存在：
-- 查询到达 → dns.rules 匹配到新规则 → 用 alidns 解析 → 返回真实 IP ✓
-- 但如果 App 缓存了旧的 fakeip 地址直接连接 → TUN 查 fakeip store 仍能找到映射 → 还是走 fakeip 路径
+`store_fakeip: true` persists mappings. If you **change DNS rules to make a domain bypass fakeip**, the old fakeip mapping still exists:
+- Query arrives → dns.rules matches the new rule → resolves via alidns → returns a real IP ✓
+- But if the app cached the old fakeip address and connects directly to it → TUN can still find the mapping in the fakeip store → still follows the fakeip path
 
-**解决方案：** 修改 fakeip 相关规则后，必须清除 SFM 缓存并重启 VPN。
+**Solution:** After changing fakeip-related rules, you must clear the SFM cache and restart the VPN.
 
-### RealIP vs FakeIP 模板选择
+### Choosing Between RealIP and FakeIP Templates
 
-| 模板 | 优势 | 代价 |
+| Template | Advantages | Trade-offs |
 |------|------|------|
-| RealIP 模板（兼容性优先） | 应用拿真实 IP；浏览器 Local Network Access、Service Worker、系统缓存和抓包调试更符合直觉；适合大多数 TUN 和浏览器场景。 | 域名恢复依赖 `dns.reverse_mapping` 的 TTL 映射与 sniff，CDN 共享 IP、ECH、非 TLS、不可 sniff 流量下可能不如 FakeIP 确定。 |
-| FakeIP 模板（分流确定性优先） | DNS 阶段给每个域名分配 fake IP，连接阶段可更确定地反查回域名；适合 RealIP reverse mapping/sniff 不够稳定的强域名分流场景。 | 可能触发浏览器 Local Network Access；fake IP 可能污染 Service Worker/浏览器缓存；映射缺失会报 `missing fakeip record`；规则变更后旧映射可能残留；ping/traceroute/日志 IP 语义失真。 |
+| RealIP template (compatibility first) | Applications receive real IPs; browser Local Network Access, Service Workers, system caches, and packet-capture debugging behave more intuitively; suitable for most TUN and browser scenarios. | Domain recovery relies on TTL-based `dns.reverse_mapping` mappings and sniffing, and may be less certain than FakeIP with shared CDN IPs, ECH, non-TLS traffic, or traffic that cannot be sniffed. |
+| FakeIP template (split-routing certainty first) | Assigns a fake IP to each domain during DNS resolution, allowing more certain reverse lookup back to the domain during connection handling; suitable for scenarios requiring strong domain-based split routing where RealIP reverse mapping/sniffing is not stable enough. | May trigger browser Local Network Access; fake IPs may contaminate Service Worker/browser caches; missing mappings produce `missing fakeip record`; old mappings may remain after rule changes; IP semantics in ping/traceroute/logs are distorted. |
 
-FakeIP 可以降低应用侧 DNS 等待，因为 FakeIP transport 对 A/AAAA 直接返回 fake IP，不做真实 DNS 查询。但真实解析没有消失：proxy 出站通常交给远端解析，direct 出站仍需本地解析。若主要诉求只是 DNS 延迟，1.14 优先用 `dns.optimistic`、`store_dns` 和缓存策略；1.13 下优先用普通 DNS cache、规则简化或浏览器专用 mixed/socks/http inbound。只有同时需要连接阶段域名恢复确定性时才选择 FakeIP。
+FakeIP can reduce application-side DNS waiting because the FakeIP transport returns fake IPs directly for A/AAAA without performing real DNS queries. But real resolution has not disappeared: proxy outbounds usually delegate resolution to the remote end, while direct outbounds still require local resolution. If the main concern is simply DNS latency, prefer `dns.optimistic`, `store_dns`, and caching strategies in 1.14; in 1.13, prefer ordinary DNS cache, simplified rules, or a browser-specific mixed/socks/http inbound. Choose FakeIP only when certainty of domain recovery during connection handling is also needed.
 
-浏览器场景如果已经出现 LNA、Service Worker 或缓存污染问题，优先使用 RealIP TUN，或给浏览器单独提供 mixed/socks/http inbound，让浏览器以域名形式交给代理链路，而不是继续依赖 FakeIP。
+If LNA, Service Worker, or cache contamination issues have already appeared in browser scenarios, prefer RealIP TUN or provide a separate mixed/socks/http inbound for the browser, allowing it to pass domain names to the proxy chain rather than continuing to rely on FakeIP.
 
-## 5. 路由规则匹配逻辑
+## 5. Routing Rule Matching Logic
 
-### 条件组合规则
+### Rules for Combining Conditions
 
-单条规则内：**不同类型字段 AND，同类型字段 OR**
+Within a single rule: **AND for fields of different types, OR for fields of the same type**
 
 ```json
 {
-  "domain_suffix": [".google.com", ".youtube.com"],  ← OR: 匹配任一后缀
-  "port": [80, 443],                                  ← OR: 匹配任一端口
-  "network": "tcp",                                    ← AND: 必须是 TCP
+  "domain_suffix": [".google.com", ".youtube.com"],  ← OR: matches either suffix
+  "port": [80, 443],                                  ← OR: matches either port
+  "network": "tcp",                                    ← AND: must be TCP
   "action": "route", "outbound": "proxy"
 }
 ```
-含义：`(google.com 或 youtube.com) 且 (80 或 443 端口) 且 (TCP)` → proxy
+Meaning: `(google.com OR youtube.com) AND (port 80 OR 443) AND (TCP)` → proxy
 
-### logical 规则
+### logical Rules
 
-用 `"type": "logical"` 实现更复杂的组合：
+Use `"type": "logical"` for more complex combinations:
 
 ```json
 {
   "type": "logical",
-  "mode": "or",      // 子规则之间 OR（也可以 "and"）
+  "mode": "or",      // OR between sub-rules (can also be "and")
   "rules": [
     { "protocol": "dns" },
     { "port": 53 }
@@ -250,185 +250,185 @@ FakeIP 可以降低应用侧 DNS 等待，因为 FakeIP transport 对 A/AAAA 直
 }
 ```
 
-### 规则顺序的陷阱
+### Rule Ordering Pitfalls
 
-路由规则是**顺序短路**的。常见错误：
+Routing rules **short-circuit in order**. Common mistakes:
 
 ```
-❌ 错误顺序:
-  Rule: ip_is_private → direct     ← 172.19.0.2 (TUN 网关) 匹配！
-  Rule: port 53 → hijack-dns      ← 永远到不了
+❌ Incorrect order:
+  Rule: ip_is_private → direct     ← 172.19.0.2 (TUN gateway) matches!
+  Rule: port 53 → hijack-dns      ← never reached
 
-✅ 正确顺序:
-  Rule: action=sniff               ← 先嗅探协议
-  Rule: port 53 OR protocol dns → hijack-dns  ← DNS 先处理
-  Rule: ip_is_private → direct     ← 其他私有 IP 才走直连
+✅ Correct order:
+  Rule: action=sniff               ← sniff the protocol first
+  Rule: port 53 OR protocol dns → hijack-dns  ← handle DNS first
+  Rule: ip_is_private → direct     ← only other private IPs go direct
 ```
 
-另一个例子（anti-leak 拦截国内应用）：
+Another example (anti-leak blocking domestic Chinese apps):
 ```
-❌ 错误:
-  Rule: reject UDP 443             ← 微信 QUIC 在这里被杀
-  Rule: geosite-cn → direct        ← 微信到不了这里
+❌ Incorrect:
+  Rule: reject UDP 443             ← WeChat QUIC is blocked here
+  Rule: geosite-cn → direct        ← WeChat never reaches this rule
 
-✅ 正确: 不要全局拒绝 UDP 443，或把 CN 规则提前
+✅ Correct: do not reject UDP 443 globally, or move the CN rule earlier
 ```
 
 ## 6. auto_route / strict_route / auto_detect_interface
 
-### auto_route 的实际行为
+### What auto_route Actually Does
 
-`auto_route` 将系统默认路由指向 TUN 接口，使所有流量进入 TUN：
+`auto_route` points the system default route to the TUN interface, sending all traffic into TUN:
 
-- **Linux**: 创建 iproute2 policy routing 规则（默认表 2022，规则优先级从 9000 开始），将匹配的流量导向 TUN 路由表
-- **macOS (命令行)**: 通过系统路由表添加路由（使用子网拆分避免覆盖默认路由）
-- **macOS/iOS/Android (图形客户端)**: 通过 Network Extension / VpnService API 设置，由系统管理路由
+- **Linux**: Creates iproute2 policy routing rules (default table 2022, rule priorities starting at 9000), directing matching traffic to the TUN routing table
+- **macOS (command line)**: Adds routes through the system routing table (using subnet splitting to avoid overwriting the default route)
+- **macOS/iOS/Android (graphical clients)**: Configured through the Network Extension / VpnService API, with routing managed by the system
 
-`auto_route` 只做路由，**不做防环**。必须配合 `route.auto_detect_interface` 或 `route.default_interface` 使用。
+`auto_route` only handles routing; it **does not prevent loops**. It must be used with `route.auto_detect_interface` or `route.default_interface`.
 
-### strict_route 的含义
+### What strict_route Means
 
-`strict_route` 因平台而异：
+`strict_route` varies by platform:
 
 **Linux:**
-- 对 TUN **未配置**的地址族（如没配 IPv6 地址），添加 `UNREACHABLE` 规则 → 该协议族流量直接报错而非泄漏到真实接口
-- 不开 `strict_route` 且不开 `auto_redirect` 时，所有 ICMP 流量不走 TUN
-- 开了 `auto_redirect` 后，`strict_route` 还控制 `SO_BINDTODEVICE` 流量（如 Docker）是否被重定向进 sing-box
+- Adds `UNREACHABLE` rules for address families **not configured** on TUN (such as when no IPv6 address is configured) → traffic for that protocol family fails immediately rather than leaking to a real interface
+- When neither `strict_route` nor `auto_redirect` is enabled, all ICMP traffic bypasses TUN
+- With `auto_redirect` enabled, `strict_route` also controls whether `SO_BINDTODEVICE` traffic (such as Docker) is redirected into sing-box
 
 **Windows:**
-- 防止 Windows 多宿主 DNS 解析行为导致的 DNS 泄漏（Windows 默认会同时查询所有网络接口的 DNS）
+- Prevents DNS leaks caused by Windows multihomed DNS resolution (Windows queries DNS on all network interfaces simultaneously by default)
 
-**macOS/移动端:**
-- 无特殊作用（VPN 模式本身已完整捕获流量）
+**macOS/mobile:**
+- No special effect (VPN mode itself already captures all traffic)
 
-### auto_detect_interface 防环机制
+### auto_detect_interface Loop Prevention Mechanism
 
-`auto_detect_interface` 本身**不防止环路**。它做的是：
+`auto_detect_interface` itself **does not prevent loops**. What it does is:
 
-1. 监听系统默认网络接口变化
-2. 当 outbound 没有显式绑定接口时，自动绑定到检测到的默认接口
+1. Monitors changes to the system's default network interface
+2. Automatically binds an outbound to the detected default interface when no interface is explicitly bound
 
-**防环的真正原理：**
-- TUN 接口接收流量（通过路由表）
-- Outbound 发出流量时绑定到**物理接口**（如 en0），绕过 TUN
-- 物理接口的流量不会再被路由回 TUN
+**How loop prevention actually works:**
+- The TUN interface receives traffic (through the routing table)
+- Outbound traffic is bound to a **physical interface** (such as en0), bypassing TUN
+- Traffic on the physical interface is not routed back into TUN
 
-如果 `auto_detect_interface: false`，outbound 不绑定接口，发出的流量可能被路由表送回 TUN → 死循环。
+If `auto_detect_interface: false`, the outbound does not bind to an interface, and outgoing traffic may be sent back to TUN by the routing table → infinite loop.
 
-### auto_redirect (Linux 推荐)
+### auto_redirect (Recommended on Linux)
 
-`auto_redirect` 在 `auto_route` 基础上，使用 nftables 实现更高效的流量重定向：
-- 性能优于 tproxy
-- 避免 TUN 与 Docker 网桥冲突
-- 支持 OpenWrt fw4 自动兼容
-- 推荐在 Linux 上始终启用
+`auto_redirect` builds on `auto_route`, using nftables for more efficient traffic redirection:
+- Better performance than tproxy
+- Avoids conflicts between TUN and Docker bridges
+- Supports automatic compatibility with OpenWrt fw4
+- Recommended to always enable on Linux
 
 ## 7. domain_resolver vs dns.rules
 
-这是两个完全独立的 DNS 解析路径：
+These are two completely independent DNS resolution paths:
 
 | | dns.rules | domain_resolver |
 |---|---|---|
-| 触发 | hijack-dns 劫持的 DNS 查询 | outbound 解析服务器域名 |
-| 规则 | 走 dns.rules 完整匹配 | 直接使用指定 DNS 服务器，**不走 dns.rules** |
-| 场景 | App 的 DNS 查询 | 代理节点地址解析、rule-set URL 解析 |
-| 配置 | `dns.rules` | outbound 上的 `domain_resolver` 或 route 上的 `default_domain_resolver` |
+| Trigger | DNS queries intercepted by hijack-dns | Outbound resolving a server domain |
+| Rules | Full matching through dns.rules | Uses the specified DNS server directly, **bypassing dns.rules** |
+| Use cases | App DNS queries | Proxy node address resolution, rule-set URL resolution |
+| Configuration | `dns.rules` | `domain_resolver` on the outbound or `default_domain_resolver` on route |
 
-这意味着：即使 dns.rules 里有复杂的分流逻辑，`default_domain_resolver: "alidns"` 解析代理节点域名时完全不受 dns.rules 影响。
+This means that even if dns.rules contains complex split-routing logic, `default_domain_resolver: "alidns"` is completely unaffected by dns.rules when resolving proxy node domains.
 
-## 8. TUN 栈选择
+## 8. Choosing a TUN Stack
 
-| 栈 | TCP | UDP | 兼容性 | 性能 |
+| Stack | TCP | UDP | Compatibility | Performance |
 |---|---|---|---|---|
-| `system` | 系统 TCP 栈 | 不支持 | 最好的 TCP 兼容 | 高 |
-| `gvisor` | 用户态 TCP | 用户态 UDP | 完整但可能有边缘问题 | 中 |
-| `mixed` | 系统 TCP | gvisor UDP | **推荐** | 高 |
+| `system` | System TCP stack | Unsupported | Best TCP compatibility | High |
+| `gvisor` | Userspace TCP | Userspace UDP | Complete, but may have edge-case issues | Medium |
+| `mixed` | System TCP | gvisor UDP | **Recommended** | High |
 
-`mixed` 结合两者优势：TCP 用系统栈保证兼容性，UDP 用 gvisor 保证支持。
+`mixed` combines the advantages of both: TCP uses the system stack for compatibility, while UDP uses gvisor for support.
 
-## 9. 常见配置模式
+## 9. Common Configuration Patterns
 
-### 模式 A: "先查后匹配" (hosts fallthrough)
+### Pattern A: "Query First, Then Match" (hosts fallthrough)
 ```json
-{ "ip_accept_any": true, "server": "hosts" }  // 有结果就用，没结果继续
+{ "ip_accept_any": true, "server": "hosts" }  // Use the result if found; otherwise continue
 ```
 
-### 模式 B: "国内外 DNS 分流"
+### Pattern B: "Split DNS Routing for Domestic Chinese and Overseas Domains"
 
-RealIP 模板默认用真实 DNS 分流：
+RealIP templates use real DNS split routing by default:
 
 ```json
 { "rule_set": "geosite-cn", "server": "alidns" },
 { "rule_set": ["geosite-google", "geosite-geolocation-!cn"], "server": "google-dns" }
 ```
 
-FakeIP 模板才使用 FakeIP 兜底：
+Only FakeIP templates use FakeIP as the fallback:
 
 ```json
-{ "rule_set": "geosite-cn", "server": "alidns" },     // 国内域名 → 国内 DNS
-{ "query_type": ["A","AAAA"], "server": "fakeip-dns" } // 其他 → FakeIP
+{ "rule_set": "geosite-cn", "server": "alidns" },     // Domestic Chinese domains → domestic Chinese DNS
+{ "query_type": ["A","AAAA"], "server": "fakeip-dns" } // Others → FakeIP
 ```
-顺序重要：geosite-cn 必须在 fakeip 之前，否则国内域名也会被 fakeip 劫持。
+Order matters: geosite-cn must precede fakeip; otherwise, domestic Chinese domains will also be intercepted by fakeip.
 
-### 模式 C: "域名直连"
-需要 DNS + 路由双规则，且都在 CN/代理兜底之前。FakeIP 模板下也要放在 fakeip 兜底之前：
+### Pattern C: "Direct Connections by Domain"
+Requires both DNS and routing rules, both before the CN/proxy fallback. In FakeIP templates, they must also precede the fakeip fallback:
 ```json
-// dns.rules: 真实解析
+// dns.rules: real resolution
 { "domain_suffix": ["example.com"], "server": "local-dns" }
-// route.rules: 直连
+// route.rules: direct connection
 { "domain_suffix": ["example.com"], "outbound": "direct" }
 ```
 
-### 模式 D: "按服务分流"
+### Pattern D: "Split Routing by Service"
 ```json
-// outbounds: 每个服务一个 selector
+// outbounds: one selector per service
 { "type": "selector", "tag": "google", "outbounds": ["proxy","direct"] }
-// route.rules: 服务 → 对应 selector
+// route.rules: service → corresponding selector
 { "rule_set": "geosite-google", "outbound": "google" }
 ```
-用户可通过 Clash API 面板为每个服务单独切换代理/直连。
+Users can switch each service independently between proxy and direct connections through a Clash API dashboard.
 
-## 10. HTTPDNS 与 TUN IPv6 陷阱
+## 10. HTTPDNS and TUN IPv6 Pitfalls
 
-### 问题
+### Problem
 
-微信等应用使用 HTTPDNS（通过 HTTP 请求获取 IP 地址）而非标准 DNS。HTTPDNS 的响应在 HTTP 载荷内部，sing-box 的 DNS 模块完全看不到。因此 `dns.strategy: "ipv4_only"` 无法阻止这些应用获取 IPv6 地址。
+Apps such as WeChat use HTTPDNS (obtaining IP addresses through HTTP requests) instead of standard DNS. HTTPDNS responses are inside the HTTP payload, completely invisible to sing-box's DNS module. Therefore, `dns.strategy: "ipv4_only"` cannot prevent these apps from obtaining IPv6 addresses.
 
-### TUN IPv6 地址的致命影响
+### The Fatal Impact of a TUN IPv6 Address
 
-当 TUN 配置了 IPv6 地址时，系统创建 IPv6 路由，应用认为 IPv6 可用：
-- 微信通过 HTTPDNS 获取 `wx.qlogo.cn` 的 IPv6 地址
-- 应用连接 IPv6 → 进入 TUN → direct outbound → 真实网卡无 IPv6 → 失败
-- 应用看到有效的 IPv6 路由（指向 TUN），持续重试而不回退 IPv4（Happy Eyeballs 失效）
+When an IPv6 address is configured on TUN, the system creates IPv6 routes and apps consider IPv6 available:
+- WeChat obtains an IPv6 address for `wx.qlogo.cn` through HTTPDNS
+- The app connects over IPv6 → enters TUN → direct outbound → physical network adapter has no IPv6 → failure
+- The app sees a valid IPv6 route (pointing to TUN) and keeps retrying instead of falling back to IPv4 (Happy Eyeballs fails)
 
-**无 TUN 时微信正常**是因为：系统无 IPv6 路由 → 内核立即返回 `ENETUNREACH` → 应用通过 Happy Eyeballs 瞬间回退 IPv4。
+**WeChat works normally without TUN** because: the system has no IPv6 route → the kernel immediately returns `ENETUNREACH` → the app instantly falls back to IPv4 through Happy Eyeballs.
 
-### 修复
+### Fix
 
-移除 TUN 的 IPv6 地址，仅保留 IPv4：
+Remove the IPv6 address from TUN, keeping only IPv4:
 ```json
 "address": "172.19.0.1/30"
 ```
 
-`dns.strategy: "ipv4_only"` 仍需保留（对标准 DNS 有效），但它不解决 HTTPDNS 的问题。
+Keep `dns.strategy: "ipv4_only"` (it works for standard DNS), but it does not solve the HTTPDNS problem.
 
-## 11. 代理链（Chained Outbounds / Detour）
+## 11. Proxy Chains (Chained Outbounds / Detour)
 
-使用 `detour` 字段将多个 outbound 串联。内层 outbound 通过外层 outbound 的隧道发送流量。
+Use the `detour` field to chain multiple outbounds. The inner outbound sends traffic through the outer outbound's tunnel.
 
 ```
-App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
+App → sing-box → ShadowTLS (outer) → Shadowsocks (inner) → destination
 ```
 
 ```json
-// 外层：ShadowTLS 伪装
+// Outer: ShadowTLS camouflage
 {
   "type": "shadowtls", "tag": "st-out",
   "server": "example.com", "server_port": 443,
   "version": 3, "password": "st-password",
   "tls": { "enabled": true, "server_name": "www.microsoft.com", "utls": { "enabled": true, "fingerprint": "chrome" } }
 }
-// 内层：Shadowsocks 经 ShadowTLS 隧道
+// Inner: Shadowsocks through the ShadowTLS tunnel
 {
   "type": "shadowsocks", "tag": "ss-out",
   "server": "127.0.0.1", "server_port": 0,
@@ -438,11 +438,11 @@ App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
 }
 ```
 
-`server`/`server_port` 在有 `detour` 时被忽略，流量直接进入 detour 指定的 outbound。但字段仍需存在（可设为任意值）。
+`server`/`server_port` are ignored when `detour` is present; traffic goes directly into the outbound specified by detour. However, the fields must still be present (they can be set to arbitrary values).
 
-## 12. 多路复用（Multiplex / Mux）
+## 12. Multiplexing (Multiplex / Mux)
 
-将多条连接合并到单个底层 TCP 连接中，减少握手开销，可选流量填充。
+Combines multiple connections into a single underlying TCP connection to reduce handshake overhead, with optional traffic padding.
 
 ```json
 {
@@ -458,16 +458,16 @@ App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
 }
 ```
 
-- `h2mux` 推荐（HTTP/2 多路复用），`smux` 兼容性更好但效率低
-- `brutal` 开启 TCP Brutal 拥塞控制（需服务器同时支持并启用 brutal）
-- `padding: true` 填充随机字节，抵抗流量分析
-- **注意：** 服务器端也必须开启 multiplex，否则连接失败
+- `h2mux` is recommended (HTTP/2 multiplexing); `smux` has better compatibility but lower efficiency
+- `brutal` enables TCP Brutal congestion control (the server must also support and enable brutal)
+- `padding: true` adds random bytes to resist traffic analysis
+- **Note:** The server must also enable multiplex; otherwise, connections fail
 
-## 13. TLS 分片（Anti-DPI）
+## 13. TLS Fragmentation (Anti-DPI)
 
-将 TLS ClientHello 拆分为小片段，绕过 DPI 深度包检测。
+Splits TLS ClientHello into small fragments to bypass DPI (deep packet inspection).
 
-### 方式 A：全局 TLS 选项
+### Method A: Global TLS Options
 ```json
 {
   "tls": {
@@ -479,7 +479,7 @@ App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
 }
 ```
 
-### 方式 B：按路由规则（route-options）
+### Method B: Per Routing Rule (route-options)
 ```json
 {
   "rule_set": "geosite-geolocation-!cn",
@@ -488,11 +488,11 @@ App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
 }
 ```
 
-`size` 和 `delay` 使用 `"min:max"` 格式（字节/毫秒），每次随机取值。
+`size` and `delay` use the `"min:max"` format (bytes/milliseconds), choosing a random value each time.
 
-## 14. Android 分应用代理
+## 14. Android Per-App Proxying
 
-使用 `include_package` / `exclude_package` 控制哪些 App 走 TUN：
+Use `include_package` / `exclude_package` to control which apps use TUN:
 
 ```json
 {
@@ -504,7 +504,7 @@ App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
 }
 ```
 
-或排除模式（代理所有 App 除了指定的）：
+Or exclusion mode (proxy all apps except those specified):
 ```json
 {
   "type": "tun",
@@ -515,11 +515,11 @@ App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
 }
 ```
 
-**不要同时使用 include 和 exclude。** 通常 `exclude_package` 更实用 — 默认全部代理，排除不需要的。
+**Do not use include and exclude together.** Usually, `exclude_package` is more practical — proxy everything by default and exclude apps that do not need it.
 
-## 15. 网络策略（移动设备 WiFi/蜂窝切换）
+## 15. Network Strategy (Mobile WiFi/Cellular Switching)
 
-`network_strategy` 控制 outbound 在多网络环境下的行为（如手机 WiFi + 蜂窝）：
+`network_strategy` controls outbound behavior in multi-network environments (such as WiFi + cellular on a phone):
 
 ```json
 {
@@ -532,17 +532,17 @@ App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
 }
 ```
 
-| 策略 | 行为 |
+| Strategy | Behavior |
 |------|------|
-| `default` | 仅使用默认网络接口 |
-| `hybrid` | 同时尝试所有可用网络，使用最快的 |
-| `fallback` | 先尝试首选网络，超时后回退到备选 |
+| `default` | Uses only the default network interface |
+| `hybrid` | Tries all available networks simultaneously and uses the fastest |
+| `fallback` | Tries the preferred network first, then falls back to the alternative after a timeout |
 
-也可在单个 outbound 的 dial fields 中设置 `network_strategy`、`network_type`、`fallback_network_type`。
+You can also set `network_strategy`, `network_type`, and `fallback_network_type` in an individual outbound's dial fields.
 
-## 16. WiFi SSID 条件路由
+## 16. Conditional Routing by WiFi SSID
 
-根据当前连接的 WiFi 网络名称切换行为：
+Switch behavior based on the name of the currently connected WiFi network:
 
 ```json
 {
@@ -552,11 +552,11 @@ App → sing-box → ShadowTLS (外层) → Shadowsocks (内层) → 目标
 }
 ```
 
-适用场景：在公司/家庭 WiFi 直连，在外部 WiFi 走代理。可结合 DNS 规则使用。
+Use case: connect directly on office/home WiFi and use a proxy on other WiFi networks. Can be combined with DNS rules.
 
-## 17. ECH（加密客户端 Hello）
+## 17. ECH (Encrypted Client Hello)
 
-ECH 加密 TLS 握手中的 SNI，防止中间设备检测目标域名。
+ECH encrypts the SNI in the TLS handshake, preventing intermediate devices from detecting the destination domain.
 
 ```json
 {
@@ -570,9 +570,9 @@ ECH 加密 TLS 握手中的 SNI，防止中间设备检测目标域名。
 }
 ```
 
-三种配置模式：
-1. **自动 DNS 查询**（推荐）：只设 `"enabled": true`，sing-box 自动查询 DNS HTTPS 记录获取 ECH 配置
-2. **手动配置**：`"config": ["base64-encoded-ECHConfigList"]`
-3. **文件路径**：`"config_path": "path/to/ech.pem"`
+Three configuration modes:
+1. **Automatic DNS query** (recommended): set only `"enabled": true`; sing-box automatically queries DNS HTTPS records to obtain the ECH configuration
+2. **Manual configuration**: `"config": ["base64-encoded-ECHConfigList"]`
+3. **File path**: `"config_path": "path/to/ech.pem"`
 
-**注意：** ECH 需要服务端支持。CloudFlare 等 CDN 通常支持。
+**Note:** ECH requires server-side support. CDNs such as CloudFlare generally support it.

@@ -1,49 +1,49 @@
-# Rule-set 与自定义分流
+# Rule-Sets and Custom Split Routing
 
-## URL 规则
+## URL Conventions
 
-`raw.githubusercontent.com` 在国内不稳定。默认使用 jsdelivr CDN：
+`raw.githubusercontent.com` is unreliable in China. Use the jsdelivr CDN by default:
 
 ```text
 https://testingcf.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-{name}.srs
 https://testingcf.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-{code}.srs
 ```
 
-`@cn` 变体标签的 URL 文件名使用 `@`，例如 `geosite-apple@cn.srs`。备用 CDN 可用 `fastly.jsdelivr.net`。
+URL filenames for `@cn` variant tags use `@`, for example `geosite-apple@cn.srs`. `fastly.jsdelivr.net` can serve as a fallback CDN.
 
-v1.13 remote rule-set 可使用 `download_detour`。v1.14 模板使用 `http_clients` + `route.default_http_client` 或 per-rule-set `http_client`。
+v1.13 remote rule-sets can use `download_detour`. v1.14 templates use `http_clients` + `route.default_http_client` or per-rule-set `http_client`.
 
-## 常用标签
+## Common Tags
 
-**Geosite**：
+**Geosite**:
 
-- 国内：`geosite-cn`、`geosite-geolocation-cn`
-- 广泛海外：`geosite-geolocation-!cn`
-- Google：`geosite-google`、`geosite-google@cn`、`geosite-youtube`、`geosite-google-gemini`
-- Microsoft：`geosite-microsoft`、`geosite-microsoft@cn`、`geosite-github`、`geosite-github-copilot`
-- Apple：`geosite-apple`、`geosite-apple@cn`、`geosite-apple-intelligence`
-- AI：`geosite-openai`、`geosite-anthropic`、`geosite-jetbrains-ai`、`geosite-category-ai-chat-!cn`、`geosite-xai`
-- Steam：`geosite-steam`、`geosite-steam@cn`
-- 社交：`geosite-telegram`、`geosite-discord`
-- 流媒体：`geosite-netflix`、`geosite-spotify`
-- 广告：`geosite-category-ads-all`
+- China: `geosite-cn`, `geosite-geolocation-cn`
+- Broad overseas coverage: `geosite-geolocation-!cn`
+- Google: `geosite-google`, `geosite-google@cn`, `geosite-youtube`, `geosite-google-gemini`
+- Microsoft: `geosite-microsoft`, `geosite-microsoft@cn`, `geosite-github`, `geosite-github-copilot`
+- Apple: `geosite-apple`, `geosite-apple@cn`, `geosite-apple-intelligence`
+- AI: `geosite-openai`, `geosite-anthropic`, `geosite-jetbrains-ai`, `geosite-category-ai-chat-!cn`, `geosite-xai`
+- Steam: `geosite-steam`, `geosite-steam@cn`
+- Social: `geosite-telegram`, `geosite-discord`
+- Streaming: `geosite-netflix`, `geosite-spotify`
+- Ads: `geosite-category-ads-all`
 
-**Geoip**：国家/地区代码，例如 `geoip-cn`、`geoip-us`、`geoip-jp`、`geoip-sg`。
+**Geoip**: Country/region codes, such as `geoip-cn`, `geoip-us`, `geoip-jp`, and `geoip-sg`.
 
-不要根据站点语言、品牌或 TLD 推断是否属于 `geosite-cn`；需要准确性时验证规则集源。
+Do not infer `geosite-cn` membership from a site's language, brand, or TLD; verify the rule-set source when accuracy is needed.
 
-## 模板内置默认规则
+## Built-In Template Defaults
 
-默认规则不需要联网查询，使用模板已有结构：
+Default rules do not require online lookup; use the template's existing structure:
 
-- 广告拒绝。
-- 国内域名/IP 直连。
-- 常见海外域名代理。
-- AI/Google/Apple/Microsoft/Steam/Telegram 等服务 selector。
+- Reject ads.
+- Connect directly to domestic domains/IPs.
+- Proxy common overseas domains.
+- Service selectors for AI/Google/Apple/Microsoft/Steam/Telegram and others.
 
-## 常见海外站点代理
+## Proxying Common Overseas Sites
 
-当用户希望常见海外网站始终走代理，优先使用：
+When the user wants common overseas sites to always use the proxy, prefer:
 
 ```json
 {
@@ -53,11 +53,11 @@ v1.13 remote rule-set 可使用 `download_detour`。v1.14 模板使用 `http_cli
 }
 ```
 
-将该规则放在 `geosite-cn` / `geoip-cn -> direct` 之前。
+Place this rule before `geosite-cn` / `geoip-cn -> direct`.
 
-## 自定义域名直连
+## Direct Connections for Custom Domains
 
-添加 DNS + route 两条规则，放在 CN/代理兜底前：
+Add both DNS and route rules before the CN/proxy fallbacks:
 
 ```json
 { "domain_suffix": ["example.com"], "action": "route", "server": "local-dns" }
@@ -67,34 +67,34 @@ v1.13 remote rule-set 可使用 `download_detour`。v1.14 模板使用 `http_cli
 { "domain_suffix": ["example.com"], "action": "route", "outbound": "direct" }
 ```
 
-`domain_suffix` 不带前导 `.` 时匹配域名本身及所有子域名。
+Without a leading `.`, `domain_suffix` matches the domain itself and all its subdomains.
 
-## 自定义域名代理
+## Proxying Custom Domains
 
-默认添加 route 规则，放在 `geosite-cn` / `geoip-cn` 和 `final` 之前：
+By default, add a route rule before `geosite-cn` / `geoip-cn` and `final`:
 
 ```json
 { "domain_suffix": ["example.com"], "action": "route", "outbound": "proxy" }
 ```
 
-RealIP 模板且 `dns.final` 是国内 DNS 时，同时添加 remote DNS 规则：
+For RealIP templates with a domestic DNS server as `dns.final`, also add a remote DNS rule:
 
 ```json
 { "domain_suffix": ["example.com"], "action": "route", "server": "google-dns" }
 ```
 
-FakeIP 模板下，仅在用户明确要求时使用：
+In FakeIP templates, use the following only when explicitly requested by the user:
 
 ```json
 { "domain_suffix": ["example.com"], "action": "route", "server": "fakeip-dns" }
 ```
 
-## 自定义规则查找策略
+## Custom-Rule Lookup Strategy
 
-只有用户明确提出自定义规则、服务出口、国家/地区出口或 rule-set 诉求时才联网查询。优先查询官方或可信规则集源。
+Look up rules online only when the user explicitly requests custom rules, service egress, country/region egress, or rule-sets. Prefer official or trusted rule-set sources.
 
-查不到合适 rule-set 时：
+If no suitable rule-set is found:
 
-- 域名诉求使用显式 `domain` / `domain_suffix` / `domain_regex`。
-- 国家/地区 IP 诉求使用 `geoip-{code}` 或显式 `ip_cidr`。
-- 服务出口诉求如果没有 selector，则创建对应 selector 或复用 `proxy`，并在摘要中说明。
+- For domain requirements, use explicit `domain` / `domain_suffix` / `domain_regex` rules.
+- For country/region IP requirements, use `geoip-{code}` or explicit `ip_cidr` rules.
+- For service-egress requirements without an existing selector, create the corresponding selector or reuse `proxy`, and explain this in the summary.

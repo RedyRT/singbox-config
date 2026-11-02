@@ -52,9 +52,9 @@ In v1.14, legacy address filter behavior is deprecated. For response-aware logic
 
 ### DNS Rule Actions
 - `"action": "route"` — route to server: `server` (required), `strategy`, `disable_cache`, `rewrite_ttl`, `client_subnet`
-- `"action": "route-options"` — set options without routing: `disable_cache`, `rewrite_ttl`, `client_subnet`（非终结动作）
-- `"action": "reject"` — 默认返回 REFUSED (`method: "default"`)，或 `"drop"` 丢弃请求。`no_drop`: 30 秒内触发 50 次后自动临时切换为 drop
-- `"action": "predefined"` — 返回预定义响应：`rcode`（NOERROR/NXDOMAIN/SERVFAIL/REFUSED）、`answer`/`ns`/`extra`（DNS 记录文本）
+- `"action": "route-options"` — set options without routing: `disable_cache`, `rewrite_ttl`, `client_subnet` (non-final action)
+- `"action": "reject"` — returns REFUSED by default (`method: "default"`), or `"drop"` discards the request. `no_drop`: automatically switches temporarily to drop after being triggered 50 times within 30 seconds
+- `"action": "predefined"` — returns a predefined response: `rcode` (NOERROR/NXDOMAIN/SERVFAIL/REFUSED), `answer`/`ns`/`extra` (DNS record text)
 - `"action": "evaluate"` — v1.14+ evaluates a DNS response so later rules can match it with `match_response: true`.
 - `"action": "respond"` — v1.14+ returns the evaluated DNS response directly.
 
@@ -99,14 +99,14 @@ In v1.14, legacy address filter behavior is deprecated. For response-aware logic
 
 Key fields:
 - `address`: TUN interface addresses (IPv4/IPv6 prefixes)
-- `auto_route`: 将系统默认路由指向 TUN 接口，使所有流量进入 TUN。Linux 通过 iproute2 policy routing（表 2022）实现，macOS 通过系统路由表实现。**必须同时配置 `route.auto_detect_interface` 或 `route.default_interface` 防止路由环路。**
-- `strict_route`: 含义因平台不同：
-  - **Linux**: 对 TUN 未配置的地址族添加 UNREACHABLE 规则（如没配 IPv6 地址 → IPv6 流量直接报错而非泄漏到真实接口）。不开 strict_route 且不开 auto_redirect 时，ICMP 不走 TUN。开了 auto_redirect 后还控制 `SO_BINDTODEVICE` 流量是否重定向。
-  - **Windows**: 防止 Windows 多宿主 DNS 解析行为导致的 DNS 泄漏。
-  - **macOS/移动端**: 无特殊作用（VPN 模式本身已完整捕获流量）。
+- `auto_route`: Points the system default route to the TUN interface so that all traffic enters TUN. Linux implements this through iproute2 policy routing (table 2022), while macOS uses the system routing table. **You must also configure `route.auto_detect_interface` or `route.default_interface` to prevent routing loops.**
+- `strict_route`: Meaning varies by platform:
+  - **Linux**: Adds UNREACHABLE rules for address families not configured on TUN (e.g. no IPv6 address configured → IPv6 traffic immediately produces an error rather than leaking to the physical interface). When neither strict_route nor auto_redirect is enabled, ICMP does not go through TUN. When auto_redirect is enabled, this also controls whether `SO_BINDTODEVICE` traffic is redirected.
+  - **Windows**: Prevents DNS leaks caused by Windows multihomed DNS resolution behavior.
+  - **macOS/mobile**: No special effect (VPN mode itself already captures all traffic).
 - `stack`: `system` (TCP only), `gvisor` (full userspace), `mixed` (system TCP + gvisor UDP, best compatibility)
-- `platform.http_proxy`: 在 TUN (VPN) 内部设置系统 HTTP 代理。通过 Network Extension API 实现（SFM/SFA/SFI），不需要额外权限。详见下方 "TUN Platform Options"。
-- `auto_redirect`: nftables redirect (Linux, better than auto_route for servers). 推荐在 Linux 上始终启用，性能优于 tproxy，避免 TUN 与 Docker 网桥冲突。
+- `platform.http_proxy`: Sets the system HTTP proxy within TUN (VPN). Implemented through the Network Extension API (SFM/SFA/SFI), with no additional permissions required. See "TUN Platform Options" below for details.
+- `auto_redirect`: nftables redirect (Linux, better than auto_route for servers). Recommended to always enable on Linux; it performs better than tproxy and avoids conflicts between TUN and Docker bridges.
 
 ## Mixed Inbound
 
@@ -121,12 +121,12 @@ Key fields:
 }
 ```
 
-Combined HTTP + SOCKS5 proxy. `set_system_proxy` 各平台实现：
-- **macOS**: 调用 `networksetup` 设置 web/secure web/SOCKS 代理（普通用户即可，无需 root；监听网络接口变化自动更新）
-- **Windows**: 通过 WinINet API 设置系统代理
-- **Linux (GNOME/KDE)**: 通过 `gsettings`（GNOME）或 `kwriteconfig5/6`（KDE）设置。以 root 运行时需要 `SUDO_USER` 环境变量来切换到真实用户执行。不支持无桌面环境的服务器。
-- **Android**: 需要 root、system (adb) 或 rish 权限，通过 `settings put global http_proxy` 设置
-- **其他平台**: 不支持
+Combined HTTP + SOCKS5 proxy. Platform implementations of `set_system_proxy`:
+- **macOS**: Calls `networksetup` to set web/secure web/SOCKS proxies (a regular user is sufficient; root is not required; monitors network interface changes and updates automatically)
+- **Windows**: Sets the system proxy through the WinINet API
+- **Linux (GNOME/KDE)**: Sets it through `gsettings` (GNOME) or `kwriteconfig5/6` (KDE). When running as root, the `SUDO_USER` environment variable is required to switch to the actual user for execution. Servers without a desktop environment are not supported.
+- **Android**: Requires root, system (adb), or rish privileges; sets it through `settings put global http_proxy`
+- **Other platforms**: Not supported
 
 ## Outbound Types
 
@@ -247,23 +247,23 @@ Goes in top-level `"endpoints": [...]`, not `"outbounds"`. Routable as outbound 
 
 ## Dial Fields (shared by outbounds + DNS servers)
 
-- `detour`: Upstream outbound tag（启用后其他 dial 字段被忽略）
-- `domain_resolver`: DNS server tag or `{"server": "tag", "strategy": "..."}` object（1.12.0+）
+- `detour`: Upstream outbound tag (other dial fields are ignored when enabled)
+- `domain_resolver`: DNS server tag or `{"server": "tag", "strategy": "..."}` object (1.12.0+)
 - `bind_interface`: Network interface to bind
-- `inet4_bind_address` / `inet6_bind_address`: 绑定的 IPv4/IPv6 地址
-- `routing_mark`: Linux netfilter 路由标记（支持整数和十六进制字符串如 `"0x1234"`）
-- `reuse_addr`: 重用监听地址
-- `netns`: 网络命名空间（1.12.0+，仅 Linux）
+- `inet4_bind_address` / `inet6_bind_address`: IPv4/IPv6 address to bind
+- `routing_mark`: Linux netfilter routing mark (supports integers and hexadecimal strings such as `"0x1234"`)
+- `reuse_addr`: Reuse the listening address
+- `netns`: Network namespace (1.12.0+, Linux only)
 - `connect_timeout`: Connection timeout (Duration)
 - `tcp_fast_open`: Enable TFO (bool)
 - `tcp_multi_path`: Enable MPTCP (bool)
-- `disable_tcp_keep_alive`: 禁用 TCP Keep-Alive（1.13.0+）
-- `tcp_keep_alive`: Keep-Alive 初始周期（1.13.0+，默认 `5m`）
-- `tcp_keep_alive_interval`: Keep-Alive 间隔（1.13.0+，默认 `75s`）
-- `udp_fragment`: 启用 UDP 分片
-- `network_strategy`: `default`, `hybrid`, `fallback`（1.11.0+，与 `bind_interface` 互斥）
-- `network_type` / `fallback_network_type`: `wifi`, `cellular`, `ethernet`, `other`（1.11.0+）
-- `fallback_delay`: Delay before trying fallback network（默认 `300ms`）
+- `disable_tcp_keep_alive`: Disable TCP Keep-Alive (1.13.0+)
+- `tcp_keep_alive`: Initial Keep-Alive period (1.13.0+, default `5m`)
+- `tcp_keep_alive_interval`: Keep-Alive interval (1.13.0+, default `75s`)
+- `udp_fragment`: Enable UDP fragmentation
+- `network_strategy`: `default`, `hybrid`, `fallback` (1.11.0+, mutually exclusive with `bind_interface`)
+- `network_type` / `fallback_network_type`: `wifi`, `cellular`, `ethernet`, `other` (1.11.0+)
+- `fallback_delay`: Delay before trying fallback network (default `300ms`)
 
 ## Multiplex (smux/h2mux)
 
@@ -283,10 +283,10 @@ Multiplexes multiple connections over a single TCP stream. Supported by: shadows
   }
 }
 ```
-- `protocol`: `smux`, `yamux`, `h2mux`（默认 `h2mux`）
+- `protocol`: `smux`, `yamux`, `h2mux` (default `h2mux`)
 - `brutal`: TCP Brutal congestion control (requires server support)
 - `padding`: randomize packet sizes to resist traffic analysis
-- `max_connections` 与 `max_streams` 互斥；`min_streams` 与 `max_streams` 互斥
+- `max_connections` and `max_streams` are mutually exclusive; `min_streams` and `max_streams` are mutually exclusive
 
 ## UDP over TCP
 
@@ -322,15 +322,15 @@ Encrypts SNI to prevent middlebox detection. Two modes:
 ### TLS Fragment
 Splits TLS ClientHello into small fragments to bypass DPI:
 - `"fragment": true` on TLS options: fragment the TLS handshake
-- `"fragment_fallback_delay"`: time before fallback to unfragmented (default `"500ms"`，源码 `constant/timeout.go`)
+- `"fragment_fallback_delay"`: time before fallback to unfragmented (default `"500ms"`, source code `constant/timeout.go`)
 - `"record_fragment": true`: also fragment TLS records (more aggressive)
-- **`fragment` 和 `record_fragment` 互斥**，不能同时开启
+- **`fragment` and `record_fragment` are mutually exclusive** and cannot be enabled simultaneously
 
 Can also be set per-route via route-options action:
 ```json
 { "action": "route-options", "tls_fragment": true, "tls_fragment_fallback_delay": "500ms" }
 ```
-注意：route-options 中 `tls_fragment` 是 bool 类型（不是对象），`tls_record_fragment` 也是 bool。两者同样互斥。
+Note: In route-options, `tls_fragment` is a bool (not an object), and `tls_record_fragment` is also a bool. These two are also mutually exclusive.
 
 ### uTLS Fingerprints
 Available: `chrome`, `firefox`, `edge`, `safari`, `360`, `qq`, `ios`, `android`, `random`, `randomized`
@@ -420,11 +420,11 @@ v1.14 FakeIP:
 }
 ```
 
-- `store_fakeip`: 持久化 fakeip 映射，重启后不丢失（否则报 "missing fakeip record"）
-- `store_rdrc`: v1.13 可用；v1.14 已弃用。持久化 DNS 响应过滤的拒绝结果缓存（RDRC = Rejected DNS Response Cache）。
-- `store_dns`: v1.14+ DNS cache persistence. 配合 `dns.optimistic` 可降低重复查询的尾延迟。
-- `rdrc_timeout`: 拒绝缓存过期时间，默认 `"7d"`
-- `cache_id`: 隔离多配置间的缓存数据
+- `store_fakeip`: Persists fakeip mappings so they are not lost after a restart (otherwise, "missing fakeip record" is reported)
+- `store_rdrc`: Available in v1.13; deprecated in v1.14. Persists the cache of rejected results from DNS response filtering (RDRC = Rejected DNS Response Cache).
+- `store_dns`: v1.14+ DNS cache persistence. Combined with `dns.optimistic`, it can reduce tail latency for repeated queries.
+- `rdrc_timeout`: Rejection cache expiration time, default `"7d"`
+- `cache_id`: Isolates cache data between multiple configurations
 
 ### Clash API
 ```json
@@ -512,10 +512,10 @@ Non-final action that sets per-connection options without selecting an outbound:
   "tls_record_fragment": true
 }
 ```
-- `tls_fragment` 和 `tls_record_fragment` 是 **bool** 类型，且**互斥**
-- `tls_fragment_fallback_delay`: 分片连接失败回退延迟（默认 `500ms`）
-- `udp_disable_domain_unmapping`: 不在 UDP 响应中发送映射域名
-- `udp_timeout`: 连接超时（DNS/NTP/STUN 默认 10s，QUIC/DTLS 默认 30s）
+- `tls_fragment` and `tls_record_fragment` are **bool** values and are **mutually exclusive**
+- `tls_fragment_fallback_delay`: Fallback delay when a fragmented connection fails (default `500ms`)
+- `udp_disable_domain_unmapping`: Do not send mapped domain names in UDP responses
+- `udp_timeout`: Connection timeout (default 10s for DNS/NTP/STUN, 30s for QUIC/DTLS)
 
 ## NTP
 
@@ -548,11 +548,11 @@ Useful for TLS certificate validation when system clock is unreliable (embedded 
 
 ## TUN Platform Options
 
-### platform.http_proxy（图形客户端专用）
+### platform.http_proxy (GUI clients only)
 
-`platform` 是由图形客户端（SFM/SFA/SFI）提供的平台特定设置，主要由图形客户端的 PlatformInterface 消费。命令行 `sing-box run` 不应依赖该块生效。
+`platform` contains platform-specific settings provided by GUI clients (SFM/SFA/SFI), primarily consumed by the GUI client's PlatformInterface. Command-line `sing-box run` should not rely on this block taking effect.
 
-在 TUN (VPN) 内部通过 Network Extension / VPN API 设置系统 HTTP 代理。与 mixed inbound 的 `set_system_proxy` 不同 — 这里不调用 `networksetup`，而是通过 VPN 隧道内部的 API 设置（Apple: `NEProxySettings`）。
+Sets the system HTTP proxy within TUN (VPN) through the Network Extension / VPN API. Unlike `set_system_proxy` on a mixed inbound — this does not call `networksetup`, but uses APIs within the VPN tunnel (Apple: `NEProxySettings`).
 
 ```json
 {
@@ -569,25 +569,25 @@ Useful for TLS certificate validation when system clock is unreliable (embedded 
 }
 ```
 
-| 字段 | 说明 |
+| Field | Description |
 |------|------|
-| `enabled` | 启用系统 HTTP 代理（默认 `false`） |
-| `server` | 代理服务器地址（通常 `127.0.0.1`，需配合 mixed inbound 监听） |
-| `server_port` | 代理服务器端口 |
-| `bypass_domain` | 绕过代理的域名。**Apple 平台匹配后缀**（`example.com` 会匹配 `api.example.com`） |
-| `match_domain` | 使用代理的域名。**仅 Apple 图形客户端支持**，其他平台忽略 |
+| `enabled` | Enable the system HTTP proxy (default `false`) |
+| `server` | Proxy server address (usually `127.0.0.1`, requires a listening mixed inbound) |
+| `server_port` | Proxy server port |
+| `bypass_domain` | Domains that bypass the proxy. **Apple platforms match suffixes** (`example.com` matches `api.example.com`) |
+| `match_domain` | Domains that use the proxy. **Supported only by Apple GUI clients**; ignored on other platforms |
 
-**注意：** HTTP 和 HTTPS 使用同一个代理服务器（Apple 实现中 `httpServer` 和 `httpsServer` 指向同一地址）。
+**Note:** HTTP and HTTPS use the same proxy server (in the Apple implementation, `httpServer` and `httpsServer` point to the same address).
 
-### macOS TUN 权限模型
+### macOS TUN Permission Model
 
-| 方式 | 权限 | 说明 |
+| Method | Permissions | Description |
 |------|------|------|
-| **SFM 图形客户端** | 无需 root（Network Extension） | Apple 开发者 entitlement `packet-tunnel-provider`，系统内核创建 TUN 设备 |
-| **SFM.System 独立模式** | 无需 root（System Extension） | 需用户在系统设置中批准安装，运行在 app 沙盒外 |
-| **命令行 `sing-box run`** | 需要 **sudo** | 直接通过 `com.apple.net.utun_control` socket 创建 utun 设备 |
+| **SFM GUI client** | No root required (Network Extension) | Apple developer entitlement `packet-tunnel-provider`; the system kernel creates the TUN device |
+| **SFM.System standalone mode** | No root required (System Extension) | Requires the user to approve installation in System Settings; runs outside the app sandbox |
+| **Command-line `sing-box run`** | Requires **sudo** | Creates the utun device directly through the `com.apple.net.utun_control` socket |
 
-### Android 分应用代理
+### Android Per-App Proxy
 
 ```json
 {
@@ -596,6 +596,6 @@ Useful for TLS certificate validation when system clock is unreliable (embedded 
   "exclude_package": ["com.tencent.mm"]
 }
 ```
-- `include_package` / `exclude_package`: Android per-app proxy（包名）
+- `include_package` / `exclude_package`: Android per-app proxy (package names)
 - `include_uid` / `exclude_uid` / `include_uid_range` / `exclude_uid_range`: Linux UID-based filtering
 - `route_address` / `route_exclude_address`: IP-based split tunneling

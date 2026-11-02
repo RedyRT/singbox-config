@@ -11,7 +11,7 @@
 | DNS cache isolation | Automatic per transport; omit deprecated `independent_cache` |
 | Persistent DNS cache | `cache_file.store_dns: true`; omit deprecated `store_rdrc` / `rdrc_timeout` |
 | Optimistic cache | `dns.optimistic: true` or an object with `enabled` and `timeout` |
-| RealIP domain recovery | `dns.reverse_mapping: true`; explicitly route overseas DNS queries to remote DNS |
+| RealIP domain recovery | `dns.reverse_mapping: true`; route selected blocked domains to remote DNS |
 | FakeIP persistence | `cache_file.store_fakeip: true` in the FakeIP variant |
 | Hosts fallback | `preferred_by: "hosts"` |
 | Remote downloads | Explicit `http_client` or `http_clients` / `route.default_http_client`; omit `download_detour` |
@@ -358,11 +358,11 @@ Available: `chrome`, `firefox`, `edge`, `safari`, `360`, `qq`, `ios`, `android`,
 ```json
 {
   "type": "remote",
-  "tag": "geosite-cn",
+  "tag": "geosite-ru-blocked",
   "format": "binary",
-  "url": "https://testingcf.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-cn.srs",
-  "http_client": "rule-set-direct",
-  "update_interval": "1d"
+  "url": "https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/geosite-ru-blocked.srs",
+  "http_client": "rule-set-proxy",
+  "update_interval": "6h"
 }
 ```
 
@@ -372,8 +372,8 @@ Define top-level `http_clients` plus `route.default_http_client`, or a per-rule-
 
 ```json
 {
-  "http_clients": [{ "tag": "rule-set-direct", "detour": "direct" }],
-  "route": { "default_http_client": "rule-set-direct" }
+  "http_clients": [{ "tag": "rule-set-proxy", "detour": "proxy" }],
+  "route": { "default_http_client": "rule-set-proxy" }
 }
 ```
 
@@ -423,10 +423,10 @@ HTTP clients accept a shared tag or an inline object. Default engine is `go`, de
   "route": {
     "rules": [],
     "rule_set": [],
-    "final": "proxy",
+    "final": "direct",
     "auto_detect_interface": true,
     "default_domain_resolver": "local-dns",
-    "default_http_client": "rule-set-direct"
+    "default_http_client": "rule-set-proxy"
   }
 }
 ```
@@ -445,7 +445,7 @@ HTTP clients accept a shared tag or an inline object. Default engine is `go`, de
   "dns": {
     "servers": [],
     "rules": [],
-    "final": "alidns",
+    "final": "local-dns",
     "strategy": "ipv4_only",
     "reverse_mapping": true,
     "optimistic": true
@@ -455,7 +455,7 @@ HTTP clients accept a shared tag or an inline object. Default engine is `go`, de
 
 - `final`: Default DNS server when no rule matches
 - `strategy`: `prefer_ipv4`, `prefer_ipv6`, `ipv4_only`, `ipv6_only`
-- `reverse_mapping`: Store real DNS A/AAAA answers as TTL-bound IP→domain mappings; required by RealIP TUN templates that rely on domain rules after DNS hijack. It does not prevent DNS pollution; route overseas/proxy domains to remote DNS with DNS rules.
+- `reverse_mapping`: Store real DNS A/AAAA answers as TTL-bound IP→domain mappings; required by RealIP TUN templates that rely on domain rules after DNS hijack. It does not prevent DNS pollution; route selected proxy domains to remote DNS with DNS rules.
 - `optimistic`: Serves expired responses while refreshing in the background, within a timeout window. `true` uses `3d`; alternatively use `{"enabled": true, "timeout": "3d"}`. Conflicts with `disable_cache` and `disable_expire`.
 - `timeout`: Default DNS query timeout, `10s`; overridable by DNS rule actions and `domain_resolver.timeout`.
 - For IPv4-only application DNS, put `{"query_type":"AAAA","action":"predefined","rcode":"NOERROR"}` before other DNS rules. Do not treat global lookup strategy as a universal raw-query filter.

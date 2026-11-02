@@ -24,7 +24,9 @@ The website includes newer development features. Check version badges and use th
 
 Both templates use typed DNS servers, optimistic/persistent DNS caching, explicit HTTP clients for rule-set downloads, and TUN `dns_mode: "hijack"`. IPv4-only defaults include an explicit empty AAAA response and an IPv4 TUN address. FakeIP additionally persists mappings with `store_fakeip`.
 
-The built-in routing policy targets users in China: domestic direct traffic, ad blocking, and proxy/service selectors for overseas traffic. Adjust it for the user's location and requirements. `dns.final` is independent of the route final outbound and current selector state; RealIP proxy domains need explicit remote DNS rules.
+The built-in policy targets **Russia: proxy listed blocked domains; connect directly otherwise**. It uses Runet Freedom's community `ru-blocked` domain list, ad blocking, and a `blocked-services` selector. Unmatched traffic and DNS remain direct/local; this is not a full-tunnel policy. Rule-sets download through the proxy with six-hour refreshes. RealIP uses proxied DoH for selected domains; optional FakeIP applies only to their address queries.
+
+See [Russia DPI diagnostics](references/russia-dpi.md) for handshake failures, transfer stalls, UDP restrictions, and client/server checks, using official documentation and reproducible network tests.
 
 Templates contain **placeholder node parameters**. Replace these and update selector/URLTest references before using a configuration.
 

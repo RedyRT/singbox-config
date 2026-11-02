@@ -5,7 +5,7 @@ description: "Use when generating, modifying, migrating, or troubleshooting sing
 
 # sing-box 1.14.4 Client Configuration Generator
 
-Generate sing-box **1.14.4** client configurations with split routing. The bundled defaults target users in China: domestic direct connections, remote DNS for explicitly proxied domains, and per-service selectors.
+Generate sing-box **1.14.4** client configurations for Russia with selective routing: listed blocked domains use the proxy, and unmatched traffic connects directly. This is not a full-tunnel policy. Use local DNS for unmatched domains and proxied DoH for selected domains.
 
 **Scope:** TUN/VPN, system proxy, manual mixed/socks/http, SFM/SFA/SFI GUI clients, and command-line `sing-box run`. Server-side proxy listeners, TLS/ACME/Reality hosting, and transparent gateway deployments are outside this skill's scope.
 
@@ -29,6 +29,7 @@ Read only the references needed for the task:
 | Rule-set URLs and custom split routing | `references/rule-sets.md` |
 | Supported fields and compatibility | `references/config-schema.md` |
 | Connection lifecycle and troubleshooting | `references/cookbook.md` |
+| Russia DPI symptoms, network tests, and evidence limits | `references/russia-dpi.md` |
 | 1.14.4 TUN RealIP (default) | `references/templates/config-1.14.4-tun-realip.json` |
 | 1.14.4 TUN FakeIP | `references/templates/config-1.14.4-tun-fakeip.json` |
 
@@ -64,7 +65,7 @@ Present a summary before generation. When the user has explicitly requested gene
 - Return JSON directly; write files only when requested.
 - Replace the template's node placeholders and update every selector/URLTest reference to the actual node tags. Never present placeholder credentials as a runnable final configuration.
 
-FakeIP is not the first choice for DNS latency alone. Prefer ordinary/optimistic caching and DNS persistence. `reverse_mapping` aids domain routing but does not prevent DNS poisoning: explicitly proxied/overseas domains still need remote DNS rules.
+FakeIP is not the first choice for DNS latency alone. Prefer ordinary/optimistic caching and DNS persistence. `reverse_mapping` does not prevent DNS poisoning: selected proxy domains need remote DNS rules. The FakeIP variant assigns synthetic addresses only to selected blocked domains; other domains keep real responses.
 
 ## Mandatory Configuration Rules
 
@@ -86,7 +87,7 @@ Keep the first two route rules:
 
 This catches DNS traffic before private-IP direct routing. Do not rely on `protocol: "dns"` alone. Retain `route.auto_detect_interface: true` to bind outbound traffic to the physical interface. `stack: "mixed"` is supported in this target release.
 
-After `ip_is_private -> direct`, reject DoT and STUN; do not globally reject UDP 443/QUIC.
+After private-IP direct routing, apply Clash modes, ad rejection, and blocked-domain routing. Do not globally reject STUN, DoT, or UDP 443/QUIC. Application-managed encrypted DNS may bypass domain policy; diagnose it per application.
 
 ### DNS and Migration
 
@@ -101,7 +102,7 @@ After `ip_is_private -> direct`, reject DoT and STUN; do not globally reject UDP
 
 ### HTTP Clients
 
-Define top-level `http_clients` and `route.default_http_client`, or an explicit per-rule-set `http_client`. Avoid the deprecated implicit HTTP client. The templates use direct downloads through `rule-set-direct`; adjust the client detour if the user's network needs proxied downloads.
+Define top-level `http_clients` and `route.default_http_client`, or an explicit per-rule-set `http_client`. The templates download through `rule-set-proxy` with `detour: "proxy"`. Proxy bootstrap uses `local-dns`, independent of remote DNS and downloaded lists. If bootstrap is blocked, use a verified reachable resolver or supplied server IP; do not introduce a proxy-resolution loop. A cached list or `initial_path` can seed startup.
 
 ### IPv6
 
@@ -110,10 +111,12 @@ Only enable dual-stack TUN when the user confirms working network IPv6 and reque
 ## Routing Decisions
 
 - Start from routing intent, not DNS selection.
-- A domain that must use the proxy needs an explicit route rule before CN/direct fallbacks and, with domestic RealIP DNS defaults, a remote DNS rule.
+- A domain that must use the proxy needs an explicit route rule before the direct fallback and a matching remote DNS rule.
 - A domain that must connect directly needs both DNS and route rules before the relevant fallbacks.
-- Do not infer `geosite-cn` membership from language, brand, or TLD; verify trusted rule-set sources when needed.
+- Use the community `geosite-ru-blocked` domain list; do not infer blocking from country, language, TLD, or hosting ASN. Add service lists only when requested or needed for an observed omission.
 - GUI / Clash API selector state is a runtime fact; JSON `default` is not necessarily the current selection. `dns.final` does not follow selector state.
+
+The `blocked-services` selector defaults to `proxy`; selecting `direct` deliberately overrides traffic routing but does not switch its DNS policy. `proxy` itself has no direct member. VLESS/Reality in the template is a credential placeholder, not a universal Russia recommendation: preserve supplied protocol, SNI, and server parameters. Read `references/russia-dpi.md` before recommending fragmentation, spoofing, or transport changes.
 
 ## Validation
 

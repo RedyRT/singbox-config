@@ -54,7 +54,7 @@ A system proxy configuration uses a mixed inbound, without a TUN inbound, DNS hi
   ],
   "route": {
     "auto_detect_interface": true,
-    "default_domain_resolver": "alidns"
+    "default_domain_resolver": "local-dns"
   }
 }
 ```

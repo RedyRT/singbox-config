@@ -61,7 +61,9 @@ Please paste node information: Clash YAML, sharing links, subscription links, si
 - Routing rules: template's built-in default rules
 - Output: return JSON directly
 
-1.14.4 TUN defaults to RealIP with `dns.reverse_mapping`, optimistic caching, persistent DNS cache, and explicit remote DNS rules for overseas/proxied domains. FakeIP is not the first choice for DNS latency optimization. Both variants explicitly suppress AAAA queries for the IPv4-only default.
+1.14.4 TUN defaults to Russia selective RealIP: `geosite-ru-blocked` uses `blocked-services` (default `proxy`) and remote DoH; unmatched traffic uses direct and local DNS. Both variants use reverse mapping, optimistic/persistent DNS caching, and IPv4-only AAAA suppression. FakeIP is optional and restricted to selected blocked address queries.
+
+State the direct fallback in the generation summary. Preserve supplied transport and Reality/SNI parameters. For blocking problems, collect ISP, connection type, region, client/server versions, and failure stage using `references/russia-dpi.md`.
 
 Use `references/templates/config-1.14.4-tun-realip.json` or `references/templates/config-1.14.4-tun-fakeip.json`. Replace the placeholder node with the user's outbounds and update every selector and URLTest member. For custom system-proxy/manual modes, adapt the RealIP structure using `references/network-modes.md`.
 

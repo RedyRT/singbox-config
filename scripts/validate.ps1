@@ -23,6 +23,18 @@ $paths = @($defaultPath, $realPath, $fakePath)
 foreach ($path in $paths) {
     $raw = Get-Content -Raw $path
     $c = $raw | ConvertFrom-Json
+    Assert-Valid ($c.route.final -eq 'direct' -and $c.dns.final -eq 'local-dns') "Russia selective defaults must fall back to direct traffic and local DNS in $path"
+    Assert-Valid ($raw -notmatch 'alidns|223\.5\.5\.5|geosite-cn|geoip-cn|geolocation-!cn|jsdelivr') "Obsolete regional defaults in $path"
+    $blockedRoute = @($c.route.rules | Where-Object { $_.rule_set -contains 'geosite-ru-blocked' })
+    Assert-Valid ($blockedRoute.Count -eq 1 -and $blockedRoute[0].outbound -eq 'blocked-services') "Missing selective blocked-domain route in $path"
+    $blockedSelector = @($c.outbounds | Where-Object tag -eq 'blocked-services')
+    Assert-Valid ($blockedSelector.Count -eq 1 -and $blockedSelector[0].default -eq 'proxy') "Missing blocked-services selector in $path"
+    $blockedDNS = @($c.dns.rules | Where-Object { $_.rule_set -contains 'geosite-ru-blocked' })
+    Assert-Valid (@($blockedDNS | Where-Object server -eq 'remote-dns').Count -eq 1) "Blocked domains need remote real DNS in $path"
+    $downloadClient = @($c.http_clients | Where-Object tag -eq $c.route.default_http_client)
+    Assert-Valid ($downloadClient.Count -eq 1 -and $downloadClient[0].detour -eq 'proxy') "Rule-set downloads must use the proxy in $path"
+    Assert-Valid ($c.route.default_domain_resolver -eq 'local-dns') "Proxy bootstrap must be independent of proxied DNS in $path"
+    Assert-Valid ($raw -notmatch '"protocol"\s*:\s*"stun"|"port"\s*:\s*853') "Selective defaults must not globally block STUN or DoT in $path"
     Assert-Valid ($raw -notmatch '"(independent_cache|store_rdrc|rdrc_timeout|download_detour)"\s*:') "Deprecated field in $path"
     Assert-Valid ($c.dns.strategy -eq 'ipv4_only') "Expected IPv4-only lookup strategy in $path"
     Assert-Valid ($c.dns.optimistic -eq $true -and $c.experimental.cache_file.store_dns -eq $true) "Missing DNS caching in $path"
@@ -65,6 +77,8 @@ foreach ($path in $paths) {
         Assert-Valid ($fakeServers.Count -eq 1 -and $c.experimental.cache_file.store_fakeip -eq $true) 'FakeIP needs a server and persistent mappings.'
         $fakeRule = @($c.dns.rules | Where-Object server -eq 'fakeip-dns')
         Assert-Valid ($fakeRule.Count -eq 1 -and 'A' -in $fakeRule[0].query_type) 'Missing FakeIP address rule.'
+        Assert-Valid ($fakeRule[0].rule_set -contains 'geosite-ru-blocked') 'FakeIP must only apply to selected blocked domains.'
+        Assert-Valid ([array]::IndexOf($c.dns.rules, $fakeRule[0]) -lt [array]::IndexOf($c.dns.rules, ($blockedDNS | Where-Object server -eq 'remote-dns'))) 'Selective FakeIP must precede real DNS for blocked domains.'
     } else {
         Assert-Valid ($fakeServers.Count -eq 0 -and -not $c.experimental.cache_file.store_fakeip -and $c.dns.reverse_mapping -eq $true) 'RealIP variant has invalid mapping settings.'
     }

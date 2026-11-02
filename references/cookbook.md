@@ -61,7 +61,7 @@ RealIP templates must set `dns.reverse_mapping: true`. After receiving a non-Fak
 
 The default 1.14.4 RealIP template combines `dns.reverse_mapping`, `dns.optimistic`, `store_dns`, and explicit HTTP clients for remote rule-set downloads.
 
-The advantage of RealIP is that applications receive real IPs, giving browsers, system caches, and debugging tools natural semantics; its weaknesses are that one real IP may correspond to multiple domains, mappings expire with their TTL, and ECH, non-TLS traffic, and traffic that cannot be sniffed reduce the certainty of domain attribution. `reverse_mapping` does not prevent DNS poisoning; protection against poisoning relies on DNS rules sending proxied/overseas domains to remote DNS.
+RealIP gives applications real IPs and natural cache/debugging behavior. Shared IPs, expired mappings, ECH, and unsniffable traffic reduce domain attribution certainty. `reverse_mapping` does not prevent DNS poisoning; selected proxy domains need matching remote DNS rules. See `russia-dpi.md` for network filtering diagnostics.
 
 ## 2. DNS Query Flow
 
@@ -114,9 +114,9 @@ Evaluate first, then test and respond. This example falls back to remote DNS whe
 
 ```json
 [
-  { "action": "evaluate", "server": "alidns" },
+  { "action": "evaluate", "server": "local-dns" },
   { "match_response": true, "ip_accept_any": true, "action": "respond" },
-  { "action": "route", "server": "google-dns" }
+  { "action": "route", "server": "remote-dns" }
 ]
 ```
 
@@ -186,14 +186,14 @@ After FakeIP reverse lookup restores the domain and routing rules select an outb
 | **direct** | Requires local resolution. Priority: 1) the outbound's `domain_resolver`, 2) `route.default_domain_resolver` (fallback), 3) the default DNS transport |
 
 **Key implications:**
-- `dns.final` (such as google-dns) is rarely used in fakeip scenarios — it only handles non-A/AAAA queries (MX, TXT, SRV)
+- In the bundled selective FakeIP variant, `dns.final: "local-dns"` handles all unmatched domains, including address queries. Selected non-address queries use `remote-dns`.
 - Real DNS resolution for a direct outbound is controlled by `route.default_domain_resolver`, **not** `dns.final`
 - A proxy outbound performs no local DNS resolution at all — the proxy server handles resolution
 
 ### FakeIP Cache Pitfalls
 
 `store_fakeip: true` persists mappings. If you **change DNS rules to make a domain bypass fakeip**, the old fakeip mapping still exists:
-- Query arrives → dns.rules matches the new rule → resolves via alidns → returns a real IP ✓
+- Query arrives → dns.rules matches the new rule → resolves via local-dns → returns a real IP ✓
 - But if the app cached the old fakeip address and connects directly to it → TUN can still find the mapping in the fakeip store → still follows the fakeip path
 
 **Solution:** After changing fakeip-related rules, you must clear the SFM cache and restart the VPN.
@@ -256,13 +256,13 @@ Routing rules **short-circuit in order**. Common mistakes:
   Rule: ip_is_private → direct     ← only other private IPs go direct
 ```
 
-Another example (anti-leak blocking domestic Chinese apps):
+Another example (global blocking breaks ordinary direct traffic):
 ```
 ❌ Incorrect:
-  Rule: reject UDP 443             ← WeChat QUIC is blocked here
-  Rule: geosite-cn → direct        ← WeChat never reaches this rule
+  Rule: reject UDP 443             ← ordinary QUIC is blocked here
+  Fallback: direct                 ← connection never reaches fallback
 
-✅ Correct: do not reject UDP 443 globally, or move the CN rule earlier
+✅ Correct: do not reject UDP 443 globally; scope any workaround to the affected service
 ```
 
 ## 6. auto_route / strict_route / auto_detect_interface
@@ -325,7 +325,7 @@ These are two completely independent DNS resolution paths:
 | Use cases | App DNS queries | Proxy node address resolution, rule-set URL resolution |
 | Configuration | `dns.rules` | `domain_resolver` on the outbound or `default_domain_resolver` on route |
 
-This means that even if dns.rules contains complex split-routing logic, `default_domain_resolver: "alidns"` is completely unaffected by dns.rules when resolving proxy node domains.
+An explicit `default_domain_resolver: "local-dns"` resolves proxy node domains independently of DNS split rules. This avoids requiring a connected proxy to resolve its own hostname.
 
 ## 8. Choosing a TUN Stack
 
@@ -344,25 +344,26 @@ This means that even if dns.rules contains complex split-routing logic, `default
 { "preferred_by": "hosts", "action": "route", "server": "hosts" }
 ```
 
-### Pattern B: "Split DNS Routing for Domestic Chinese and Overseas Domains"
+### Pattern B: Selective DNS for Blocked Domains
 
 RealIP templates use real DNS split routing by default:
 
 ```json
-{ "rule_set": "geosite-cn", "server": "alidns" },
-{ "rule_set": ["geosite-google", "geosite-geolocation-!cn"], "server": "google-dns" }
+{ "rule_set": "geosite-ru-blocked", "action": "route", "server": "remote-dns" }
 ```
 
-Only FakeIP templates use FakeIP as the fallback:
+FakeIP templates insert an address-query rule before remote DNS for the same selected domains:
 
 ```json
-{ "rule_set": "geosite-cn", "server": "alidns" },     // Domestic Chinese domains → domestic Chinese DNS
-{ "query_type": ["A","AAAA"], "server": "fakeip-dns" } // Others → FakeIP
+[
+  { "rule_set": "geosite-ru-blocked", "query_type": ["A","AAAA"], "action": "route", "server": "fakeip-dns" },
+  { "rule_set": "geosite-ru-blocked", "action": "route", "server": "remote-dns" }
+]
 ```
-Order matters: geosite-cn must precede fakeip; otherwise, domestic Chinese domains will also be intercepted by fakeip.
+Both variants use `dns.final: "local-dns"`. Keep AAAA suppression, hosts, Clash overrides, and ad rejection before these rules. FakeIP must not catch unmatched domains or non-address queries.
 
 ### Pattern C: "Direct Connections by Domain"
-Requires both DNS and routing rules, both before the CN/proxy fallback. In FakeIP templates, they must also precede the fakeip fallback:
+Requires both DNS and routing rules before the blocked-domain rules. In FakeIP templates, put the DNS exception before selective FakeIP too:
 ```json
 // dns.rules: real resolution
 { "domain_suffix": ["example.com"], "server": "local-dns" }
@@ -378,6 +379,20 @@ Requires both DNS and routing rules, both before the CN/proxy fallback. In FakeI
 { "rule_set": "geosite-google", "outbound": "google" }
 ```
 Users can switch each service independently between proxy and direct connections through a Clash API dashboard.
+
+Declare the service rule-set and add a matching DNS rule; otherwise domains absent from `ru-blocked` still use local DNS:
+
+```json
+{ "rule_set": "geosite-google", "action": "route", "server": "remote-dns" }
+```
+
+In FakeIP mode, optionally precede that rule with a service-scoped address rule:
+
+```json
+{ "rule_set": "geosite-google", "query_type": ["A", "AAAA"], "action": "route", "server": "fakeip-dns" }
+```
+
+Keep the remote rule for non-address queries and AAAA suppression first. Service overrides precede existing blocked-domain rules in both DNS and routing. Selector changes do not automatically change DNS; a full direct exception requires paired local-DNS/direct rules.
 
 ## 10. HTTPDNS and TUN IPv6 Pitfalls
 

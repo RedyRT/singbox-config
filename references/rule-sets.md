@@ -1,74 +1,47 @@
-# Rule-Sets and Custom Split Routing (1.14.4)
+# Russia Rule-Sets and Selective Routing (1.14.4)
 
-Official reference: https://sing-box.sagernet.org/configuration/rule-set/
+Official schema: https://sing-box.sagernet.org/configuration/rule-set/
 
-## URL Conventions
+## Sources and Defaults
 
-`raw.githubusercontent.com` is unreliable in China. Use the jsdelivr CDN by default:
+Use [Runet Freedom's release files](https://github.com/runetfreedom/russia-v2ray-rules-dat/tree/release/sing-box/rule-set-geosite). Its [README](https://github.com/runetfreedom/russia-v2ray-rules-dat) describes `ru-blocked` as community.antifilter.download plus re:filter, updated every six hours. These are community lists, not a guarantee of blocking on every Russian ISP.
+
+Base URL:
 
 ```text
-https://testingcf.jsdelivr.net/gh/SagerNet/sing-geosite@rule-set/geosite-{name}.srs
-https://testingcf.jsdelivr.net/gh/SagerNet/sing-geoip@rule-set/geoip-{code}.srs
+https://raw.githubusercontent.com/runetfreedom/russia-v2ray-rules-dat/release/sing-box/rule-set-geosite/
 ```
 
-URL filenames for `@cn` variant tags use `@`, for example `geosite-apple@cn.srs`. `fastly.jsdelivr.net` can serve as a fallback CDN.
+| Filename | Local tag | Default use |
+|----------|-----------|-------------|
+| `geosite-ru-blocked.srs` | `geosite-ru-blocked` | Proxy selected blocked domains |
+| `geosite-category-ads-all.srs` | `geosite-ads` | Reject ads |
+| `geosite-youtube.srs` | `geosite-youtube` | Optional service override |
+| `geosite-discord.srs` | `geosite-discord` | Optional service override |
 
-1.14.4 templates use `http_clients` + `route.default_http_client` or per-rule-set `http_client`. Omit deprecated `download_detour` and the implicit default HTTP client.
+Do not substitute `ru-blocked-all`, broad hosting IP/ASN ranges, or a country list by default. Shared infrastructure can route unrelated traffic through the proxy. Domain lists can miss new blocks, application IP connections, and service dependencies; add measured exceptions as needed.
+
+## Downloads and Bootstrap
 
 ```json
 {
-  "http_clients": [{ "tag": "rule-set-direct", "detour": "direct" }],
-  "route": { "default_http_client": "rule-set-direct" }
+  "http_clients": [{ "tag": "rule-set-proxy", "detour": "proxy" }],
+  "route": {
+    "default_http_client": "rule-set-proxy",
+    "default_domain_resolver": "local-dns"
+  }
 }
 ```
 
-This fragment assumes an outbound tagged `direct`. `initial_path` can seed a remote rule-set before a cached copy exists. Multi-tag definitions require a `{tag}` placeholder in URL/path; keep individual definitions where URL filenames differ from local tags.
+This fragment assumes the template's `proxy` outbound and local DNS server. Set remote lists to `update_interval: "6h"`. Omit deprecated `download_detour`. Bootstrap must work before proxied DNS and list downloads: use a reachable local resolver or a verified server IP supplied by the operator. Keep TLS server name unchanged when using an IP. Cached rule-sets or a verified `initial_path` can seed startup when downloads are unavailable; an empty list silently defeats selective coverage.
 
-## Common Tags
+## Rule Mode Policy
 
-**Geosite**:
+After sniffing and DNS hijack: private addresses connect directly, Clash mode overrides apply, ads are rejected, then blocked domains use `blocked-services`. Unmatched traffic uses `route.final: "direct"`. DNS mirrors the selected domains, with `dns.final: "local-dns"`. Global/Direct modes override selection but retain earlier private routing and AAAA/hosts handling.
 
-- China: `geosite-cn`, `geosite-geolocation-cn`
-- Broad overseas coverage: `geosite-geolocation-!cn`
-- Google: `geosite-google`, `geosite-google@cn`, `geosite-youtube`, `geosite-google-gemini`
-- Microsoft: `geosite-microsoft`, `geosite-microsoft@cn`, `geosite-github`, `geosite-github-copilot`
-- Apple: `geosite-apple`, `geosite-apple@cn`, `geosite-apple-intelligence`
-- AI: `geosite-openai`, `geosite-anthropic`, `geosite-jetbrains-ai`, `geosite-category-ai-chat-!cn`, `geosite-xai`
-- Steam: `geosite-steam`, `geosite-steam@cn`
-- Social: `geosite-telegram`, `geosite-discord`
-- Streaming: `geosite-netflix`, `geosite-spotify`
-- Ads: `geosite-category-ads-all`
+## Custom Direct Exception
 
-**Geoip**: Country/region codes, such as `geoip-cn`, `geoip-us`, `geoip-jp`, and `geoip-sg`.
-
-Do not infer `geosite-cn` membership from a site's language, brand, or TLD; verify the rule-set source when accuracy is needed.
-
-## Built-In Template Defaults
-
-Default rules do not require online lookup; use the template's existing structure:
-
-- Reject ads.
-- Connect directly to domestic domains/IPs.
-- Proxy common overseas domains.
-- Service selectors for AI/Google/Apple/Microsoft/Steam/Telegram and others.
-
-## Proxying Common Overseas Sites
-
-When the user wants common overseas sites to always use the proxy, prefer:
-
-```json
-{
-  "rule_set": "geosite-geolocation-!cn",
-  "action": "route",
-  "outbound": "proxy"
-}
-```
-
-Place this rule before `geosite-cn` / `geoip-cn -> direct`.
-
-## Direct Connections for Custom Domains
-
-Add both DNS and route rules before the CN/proxy fallbacks:
+Place both rules before blocked-domain rules (and before ad rejection if intentionally overriding an ad entry):
 
 ```json
 { "domain_suffix": ["example.com"], "action": "route", "server": "local-dns" }
@@ -78,36 +51,24 @@ Add both DNS and route rules before the CN/proxy fallbacks:
 { "domain_suffix": ["example.com"], "action": "route", "outbound": "direct" }
 ```
 
-Without a leading `.`, `domain_suffix` matches the domain itself and all its subdomains.
+## Custom Proxy Domain
 
-## Proxying Custom Domains
-
-By default, add a route rule before `geosite-cn` / `geoip-cn` and `final`:
+Add a traffic rule before the direct fallback and a matching DNS rule:
 
 ```json
 { "domain_suffix": ["example.com"], "action": "route", "outbound": "proxy" }
 ```
 
-For RealIP templates with a domestic DNS server as `dns.final`, also add a remote DNS rule:
-
 ```json
-{ "domain_suffix": ["example.com"], "action": "route", "server": "google-dns" }
+{ "domain_suffix": ["example.com"], "action": "route", "server": "remote-dns" }
 ```
 
-In FakeIP templates, use the following only when explicitly requested by the user:
+For selective FakeIP, insert this before the remote DNS rule, retaining that rule for non-address queries:
 
 ```json
 { "domain_suffix": ["example.com"], "query_type": ["A", "AAAA"], "action": "route", "server": "fakeip-dns" }
 ```
 
-Keep the IPv4-only AAAA-suppression rule before this rule. FakeIP supports only address queries; HTTPS/SVCB, TXT, MX, and other query types must continue to a real DNS server.
+Keep AAAA suppression first for IPv4-only configurations. FakeIP cannot answer HTTPS/SVCB, TXT, or MX queries. Without a leading dot, `domain_suffix` covers the domain and its subdomains.
 
-## Custom-Rule Lookup Strategy
-
-Look up rules online only when the user explicitly requests custom rules, service egress, country/region egress, or rule-sets. Prefer official or trusted rule-set sources.
-
-If no suitable rule-set is found:
-
-- For domain requirements, use explicit `domain` / `domain_suffix` / `domain_regex` rules.
-- For country/region IP requirements, use `geoip-{code}` or explicit `ip_cidr` rules.
-- For service-egress requirements without an existing selector, create the corresponding selector or reuse `proxy`, and explain this in the summary.
+For an optional service list, declare its remote rule-set and reference the same tag in DNS and traffic rules. Do not assume its domains are absent from `ru-blocked`; check membership if accuracy matters. Add dedicated selectors only when the user needs separate service egress.

@@ -2,7 +2,7 @@
 
 The main documentation is now in English: [README.md](README.md).
 
-This skill targets **sing-box 1.14.4 stable** with two variants:
+This skill targets **sing-box 1.14.4 stable for Russia**, proxying selected blocked domains and connecting directly otherwise, with two variants:
 
 - **RealIP (default):** `references/templates/config-1.14.4-tun-realip.json`
 - **FakeIP (optional):** `references/templates/config-1.14.4-tun-fakeip.json`

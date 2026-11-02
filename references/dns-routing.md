@@ -26,7 +26,7 @@ RealIP templates use real DNS responses. With `dns.reverse_mapping: true`, the D
 
 The stable 1.14.4 RealIP template is the default. It uses `dns.reverse_mapping`, `dns.optimistic`, `store_dns`, explicit HTTP clients, and hosts-aware DNS rules.
 
-`reverse_mapping` does not validate or correct DNS responses, nor prevent poisoning. If domestic DNS returns a poisoned IP for an overseas domain, it simply records that poisoned IP's mapping. To avoid DNS poisoning for overseas domains, RealIP templates must route explicitly proxied/overseas rule-sets to remote DNS in their DNS rules.
+`reverse_mapping` does not validate or correct DNS responses. A poisoned answer produces a poisoned mapping. Route selected blocked domains to proxied remote DNS, matching the domain lists in traffic routing; unmatched domains intentionally use local DNS.
 
 Advantages:
 
@@ -82,15 +82,17 @@ FakeIP does not eliminate real resolution: proxy outbounds usually pass the doma
 RealIP template defaults:
 
 - The IPv4-only AAAA-suppression rule runs first, then hosts-aware matching with `preferred_by: "hosts"`.
-- Domestic domains use `alidns`.
-- Explicitly proxied domains use remote DNS.
-- final defaults to domestic DNS.
+- Clash Direct uses local DNS; Global uses remote DNS. Ads are rejected in Rule mode.
+- `geosite-ru-blocked` uses `remote-dns` (DoH through `proxy`).
+- `dns.final` is `local-dns` and `route.final` is `direct`.
 
 FakeIP template defaults:
 
-- Domestic domains use real domestic DNS.
-- Other address queries can use `fakeip-dns`; the IPv4-only template suppresses AAAA first, so only A queries reach it by default.
+- Only `geosite-ru-blocked` address queries use `fakeip-dns`; the earlier AAAA rule means only A reaches it by default.
+- Selected non-address queries use `remote-dns`; unmatched queries use real local DNS.
 - `experimental.cache_file.store_fakeip: true` must be enabled.
+
+DNS does not follow `blocked-services` selector changes. Selecting direct traffic still leaves the configured DNS policy in place. Full direct exceptions need both DNS and route rules before the blocked-domain rules. Flush application DNS caches and reconnect when testing policy changes.
 
 ## Default IPv6 Strategy
 

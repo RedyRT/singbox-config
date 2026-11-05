@@ -487,7 +487,7 @@ Splits TLS ClientHello into small fragments to bypass DPI (deep packet inspectio
 ### Method B: Per Routing Rule (route-options)
 ```json
 {
-  "rule_set": "geosite-geolocation-!cn",
+  "rule_set": "geosite-ru-blocked",
   "action": "route-options",
   "tls_fragment": true,
   "tls_fragment_fallback_delay": "500ms"

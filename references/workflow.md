@@ -65,6 +65,17 @@ Please paste node information: Clash YAML, sharing links, subscription links, si
 
 State the direct fallback in the generation summary. Preserve supplied transport and Reality/SNI parameters. For blocking problems, collect ISP, connection type, region, client/server versions, and failure stage using `references/russia-dpi.md`.
 
+### Application and Effective-Configuration Check
+
+When troubleshooting imports, unexplained routing/DNS behavior, or transport compatibility, ask only for missing details:
+
+- Application name/version and operating system.
+- Actual embedded core name/version (not merely the application's advertised protocol support).
+- Active profile and effective/generated configuration, with credentials and subscription tokens redacted; if export is unavailable, use relevant settings and startup/routing logs.
+- Application overrides for DNS, routing, TUN/system proxy, and the selected outbound/Clash mode.
+
+Confirm that the application loaded and applied the intended DNS, routing, and transport settings before diagnosing TSPU interference. A successful check with a standalone 1.14.4 binary does not establish compatibility with a different embedded core. Do not launch this diagnostic questionnaire for routine generation when the target is already known.
+
 Use `references/templates/config-1.14.4-tun-realip.json` or `references/templates/config-1.14.4-tun-fakeip.json`. Replace the placeholder node with the user's outbounds and update every selector and URLTest member. For custom system-proxy/manual modes, adapt the RealIP structure using `references/network-modes.md`.
 
 ## Custom Rule Triggers

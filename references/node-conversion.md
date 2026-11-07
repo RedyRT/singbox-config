@@ -24,6 +24,21 @@ Use this file when converting Clash YAML, V2Ray share information, or manually s
 
 Server addresses specified as IP addresses do not need `domain_resolver`.
 
+## Transport Compatibility Gate
+
+The [1.14.4 transport implementation](https://github.com/SagerNet/sing-box/blob/v1.14.4/option/v2ray_transport.go) supports HTTP, WebSocket, QUIC, gRPC, and HTTPUpgrade. Native Xray **XHTTP/splitHTTP is not supported** in this target.
+
+- If a node requires `xhttp` or `splithttp`, identify the incompatible node and request a supported profile from its operator. Do not rename it to `http`, omit its transport, or silently drop it from a subscription.
+- Do not copy Xray `streamSettings`, `xhttpSettings`, `extra`, `xmux`, or `mux` blocks directly into sing-box. Verify each setting's semantics and target support; similarly named multiplexing settings are not automatically equivalent.
+- Preserve required authentication, flow, path, host, TLS, and transport semantics. If they cannot be represented, explain the incompatibility rather than producing a runnable-looking partial conversion.
+- Client branding is insufficient: verify the application's actual embedded core/version when compatibility is uncertain.
+
+## uTLS and Fingerprint Handling
+
+The [official 1.14.4 TLS documentation](https://github.com/SagerNet/sing-box/blob/v1.14.4/docs/configuration/shared/tls.md#utls) warns against relying on uTLS for censorship resistance. Copying a browser's ClientHello does not reproduce its complete TLS stack or traffic behavior.
+
+`chrome` in the examples is illustrative, not a Russia-wide recommendation. Preserve a supplied supported fingerprint. Do not automatically replace it with `firefox`, `qq`, `random`, or `randomized` based on historical reports. If a fingerprint is unsupported or a legacy value falls back to Chrome, explain that behavior instead of implying faithful conversion. Compare alternatives only as controlled tests on the affected network; see `russia-dpi.md`.
+
 ## VLESS
 
 ```json

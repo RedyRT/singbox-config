@@ -45,6 +45,7 @@ Read `references/workflow.md` when generating a new configuration.
 - Explicit routing requirements: enter the custom-rule flow.
 - Existing configuration: ask only for information missing for the requested change.
 - Unrecognized node format: ask only about the format or missing protocol fields.
+- Unsupported transport: sing-box 1.14.4 cannot natively represent Xray XHTTP/splitHTTP. Request a supported server profile; never rename it to HTTP, discard required transport fields, or present a lossy conversion as runnable. See `references/node-conversion.md`.
 
 Prefer structured selection controls when available and permitted; otherwise ask short text questions. Accept nodes, subscriptions, YAML, and JSON through ordinary chat input.
 
@@ -117,6 +118,8 @@ Only enable dual-stack TUN when the user confirms working network IPv6 and reque
 - GUI / Clash API selector state is a runtime fact; JSON `default` is not necessarily the current selection. `dns.final` does not follow selector state.
 
 The `blocked-services` selector defaults to `proxy`; selecting `direct` deliberately overrides traffic routing but does not switch its DNS policy. `proxy` itself has no direct member. VLESS/Reality in the template is a credential placeholder, not a universal Russia recommendation: preserve supplied protocol, SNI, and server parameters. Read `references/russia-dpi.md` before recommending fragmentation, spoofing, or transport changes.
+
+For troubleshooting, identify the application/version, embedded core/version, and effective configuration before attributing failures to censorship. Distinguish endpoint blocking from allowlist-only access. A browser-like uTLS fingerprint is not proof of browser-equivalent behavior or censorship resistance; preserve supported supplied values rather than applying a purported universal fingerprint fix.
 
 ## Validation
 

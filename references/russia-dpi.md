@@ -6,10 +6,26 @@ Use official sing-box documentation for supported configuration fields and repro
 
 ## November 2026 Reports: What Applies
 
-Sources reviewed 2026-11-23:
+This section is a self-contained paraphrase of the useful findings, reviewed 2026-11-23. Reading the original articles is not required. Attribution is retained as plain text so the guidance does not depend on an external page remaining available:
 
-- [VPN construction guide, November 7](https://habr.com/ru/articles/1103460/): reports repeated loss of individual server IPs and proposes separating entry from egress. The author explicitly lacks direct proof that application reporting caused those blocks. Treat this as a threat model, not established causality.
-- [TSPU investigation, November 9](https://habr.com/ru/articles/1105268/): reports ICMP success while TCP/UDP to one IP were dropped, including return packets for connections initiated from abroad. Results are path-specific; NAT and host filtering confound some protocol tests.
+- Maxim / mureevms, “Методичка по построению VPN, осень 2026”, November 7, 2026, Habr article 1103460.
+- Vladislav Gorodkov / fuccsoc, “Очередное исследование методов блокировок ТСПУ”, November 9, 2026, Habr article 1105268.
+
+### Preserved Findings and Their Limits
+
+**Entry and exit exposure:** the first author reported four individual foreign server IPs becoming unreachable over several weeks, while nearby addresses remained reachable; some affected IPs later recovered. Changes of hosting provider or address did not establish a durable remedy in that sample. The proposed architecture separates the address clients connect to from the address destinations see: a separate exit proxy, another server IP, or operator-managed WARP egress. If the exit fails, user traffic must stop rather than leave directly from the entry.
+
+The author explicitly had no direct evidence for the chain “an application reported the exit IP, therefore that IP was blocked.” Treat it as a threat model, not established causality. Applications can discover their public egress through their own destinations, so blocking a list of IP-check websites cannot guarantee protection. Client split routing does not create a separate exit. A second address on the same host still shares hosting/subnet risks; WARP adds an external dependency. Client-side implementation and failure tests are described below.
+
+**Protocol-specific reachability:** the second author observed successful ICMP echo while TCP attempts to multiple service ports timed out. Paired captures showed RU-originated SYNs absent at the foreign server. In the reverse test, foreign SYNs reached RU and RU sent SYN-ACKs, but those replies did not reach the foreign server. This is consistent with dropping packets destined for the foreign IP on the RU-to-foreign path; it does not mean that a connection initiated abroad can complete. Neighboring addresses responding supported a single-address restriction in that experiment, not a universal rule about block size.
+
+The first report described some outgoing connections from blocked servers to Russian sites as working; the second showed that their return packets can also be lost. Do not assume a blocked address remains a usable exit to Russian destinations: verify complete request/response traffic on the actual path.
+
+**Experimental tunnels are not a client recipe:** the second report observed some GRE payload variants, ESP/AH, and ICMP passing at low rates while other probes failed or were throttled. Cloud NAT confounded several tests, and traceroute silence alone did not locate the filter. These results neither establish a stable bypass nor add GRE/ICMP transports to sing-box. Preserve the diagnostic lesson—test the actual protocol and both directions—not the raw-packet experiment scripts.
+
+**Transport claims need independent testing:** the first report recommended XHTTP, own-domain SNI, browser fingerprints, and connection-pool tuning. Its claims about raw TCP failure, byte thresholds, handshake counts, and timed penalties are not universal measurements. For sing-box, use the local VLESS transport table in `node-conversion.md`; server support and sustained traffic tests are required. The report's local-proxy warning is actionable: loopback alone does not stop other local applications from using an unauthenticated SOCKS/HTTP listener.
+
+### Applying the Findings to sing-box
 
 | Article advice or observation | Client-skill decision |
 |--------------------------------|-----------------------|

@@ -65,6 +65,8 @@ Please paste node information: Clash YAML, sharing links, subscription links, si
 
 State the direct fallback in the generation summary. Preserve supplied transport and Reality/SNI parameters. For blocking problems, collect ISP, connection type, region, client/server versions, and failure stage using `references/russia-dpi.md`.
 
+For XHTTP replacement requests, read the VLESS alternative table in `references/node-conversion.md` and obtain a matching server profile before generating JSON. For requests to conceal the entry IP or separate entry/exit, read `references/russia-dpi.md`: establish whether the operator already provides separate egress or the user supplies two compatible profiles for a client chain. State the protected traffic scope and failure behavior; do not silently switch selective routing to full tunneling or leave entry-only/direct members in a selector described as fail-closed.
+
 ### Application and Effective-Configuration Check
 
 When troubleshooting imports, unexplained routing/DNS behavior, or transport compatibility, ask only for missing details:

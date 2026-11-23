@@ -11,7 +11,7 @@ Generate sing-box **1.14.4** client configurations for Russia with selective rou
 
 ## Release and Source Policy
 
-- Target **1.14.4 stable**, released 2026-10-24; documentation checked 2026-11-03.
+- Target **1.14.4 stable**, released 2026-10-24. November blocking guidance and transport references checked 2026-11-23; see `references/russia-dpi.md` for dated observations and evidence limits.
 - [Release](https://github.com/SagerNet/sing-box/releases/tag/v1.14.4), [official documentation](https://sing-box.sagernet.org/configuration/), [migration guide](https://sing-box.sagernet.org/migration/).
 - The website is rolling documentation. Check each feature's version badge; do not generate features introduced after 1.14.4. Resolve ambiguities against the [v1.14.4 source](https://github.com/SagerNet/sing-box/tree/v1.14.4) and the matching binary.
 - Generate only this target version; there is no version-selection wizard. Migrate older input configurations to this target.
@@ -25,11 +25,11 @@ Read only the references needed for the task:
 | Generation flow, options, defaults, summary | `references/workflow.md` |
 | TUN, system proxy, manual proxies, platform behavior | `references/network-modes.md` |
 | DNS hijack, RealIP/FakeIP, caching, IPv6 | `references/dns-routing.md` |
-| Clash/V2Ray node conversion | `references/node-conversion.md` |
+| Clash/V2Ray conversion, VLESS alternatives to XHTTP, flow/TLS compatibility | `references/node-conversion.md` |
 | Rule-set URLs and custom split routing | `references/rule-sets.md` |
 | Supported fields and compatibility | `references/config-schema.md` |
 | Connection lifecycle and troubleshooting | `references/cookbook.md` |
-| Russia DPI symptoms, network tests, and evidence limits | `references/russia-dpi.md` |
+| Russia DPI/IP blocking, entry/exit separation, November reports | `references/russia-dpi.md` |
 | 1.14.4 TUN RealIP (default) | `references/templates/config-1.14.4-tun-realip.json` |
 | 1.14.4 TUN FakeIP | `references/templates/config-1.14.4-tun-fakeip.json` |
 
@@ -45,7 +45,7 @@ Read `references/workflow.md` when generating a new configuration.
 - Explicit routing requirements: enter the custom-rule flow.
 - Existing configuration: ask only for information missing for the requested change.
 - Unrecognized node format: ask only about the format or missing protocol fields.
-- Unsupported transport: sing-box 1.14.4 cannot natively represent Xray XHTTP/splitHTTP. Request a supported server profile; never rename it to HTTP, discard required transport fields, or present a lossy conversion as runnable. See `references/node-conversion.md`.
+- Unsupported transport: sing-box 1.14.4 cannot natively represent Xray XHTTP/splitHTTP. Request a supported server profile; never rename it to HTTP, discard required transport fields, or present a lossy conversion as runnable. For a VLESS HTTP/2 alternative, first consider an operator-provided gRPC+TLS profile; this is not wire-compatible with XHTTP or a proven DPI equivalent. See the transport decision table in `references/node-conversion.md`.
 
 Prefer structured selection controls when available and permitted; otherwise ask short text questions. Accept nodes, subscriptions, YAML, and JSON through ordinary chat input.
 
@@ -120,6 +120,8 @@ Only enable dual-stack TUN when the user confirms working network IPv6 and reque
 The `blocked-services` selector defaults to `proxy`; selecting `direct` deliberately overrides traffic routing but does not switch its DNS policy. `proxy` itself has no direct member. VLESS/Reality in the template is a credential placeholder, not a universal Russia recommendation: preserve supplied protocol, SNI, and server parameters. Read `references/russia-dpi.md` before recommending fragmentation, spoofing, or transport changes.
 
 For troubleshooting, identify the application/version, embedded core/version, and effective configuration before attributing failures to censorship. Distinguish endpoint blocking from allowlist-only access. A browser-like uTLS fingerprint is not proof of browser-equivalent behavior or censorship resistance; preserve supported supplied values rather than applying a purported universal fingerprint fix.
+
+For November-style blocking reports, distinguish a dropped endpoint IP from a TLS/transport failure before tuning the client. Ping success does not prove TCP/UDP reachability. Selective routing does not guarantee concealment of the proxy's entry IP: read `references/russia-dpi.md` for entry/exit separation, fail-closed chains, and local proxy exposure. Do not silently replace the default selective policy with full tunneling.
 
 ## Validation
 

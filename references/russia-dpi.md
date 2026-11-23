@@ -4,6 +4,24 @@
 
 Use official sing-box documentation for supported configuration fields and reproducible network tests for connectivity conclusions. Record date, ISP, region, access type, client/server versions, and failure stage. Do not infer a nationwide mechanism, universal byte threshold, working SNI, or protocol ban from an isolated failure.
 
+## November 2026 Reports: What Applies
+
+Sources reviewed 2026-11-23:
+
+- [VPN construction guide, November 7](https://habr.com/ru/articles/1103460/): reports repeated loss of individual server IPs and proposes separating entry from egress. The author explicitly lacks direct proof that application reporting caused those blocks. Treat this as a threat model, not established causality.
+- [TSPU investigation, November 9](https://habr.com/ru/articles/1105268/): reports ICMP success while TCP/UDP to one IP were dropped, including return packets for connections initiated from abroad. Results are path-specific; NAT and host filtering confound some protocol tests.
+
+| Article advice or observation | Client-skill decision |
+|--------------------------------|-----------------------|
+| Separate entry IP from public egress | Explain the architecture and optional client chain below; server egress, second-IP binding, WARP, panels, and self-steal SNI need operator work. |
+| Raw TCP/Reality always fails; XHTTP is mandatory | Do not adopt a universal ban. Preserve working profiles; use the supported VLESS alternatives in `node-conversion.md` for controlled trials. |
+| Three handshakes, fixed byte cutoffs, timed penalties | Record measured behavior, not universal thresholds. Avoid rapid reconnect/probe storms during diagnosis; do not invent cooldown constants or translate Xray `xmux` to sing-box mux. |
+| Browser fingerprint or own-domain SNI guarantees camouflage | Neither is a guarantee. SNI/Reality require a matching server; uTLS only imitates part of browser behavior. |
+| GRE, ESP, ICMP, or asymmetric routing got some packets through | Not native VLESS transports or ready client fixes. Do not generate them as sing-box transport types; experimental host/network tunnels are outside scope. |
+| Replace split routing with full tunneling | Different routing/privacy policy. Retain this skill's selective default unless the user requests a change; neither policy alone separates entry and exit. |
+
+Do not copy Xray `sendThrough`, `IPOnDemand`, `fallbackTag`, `freedom`, or `blackhole` into sing-box JSON. Translate an actual client requirement using sing-box fields; server architecture remains outside scope.
+
 ## Confirm the Running Client First
 
 Record application name/version, OS, and embedded core name/version. Inspect the active profile and effective configuration or relevant logs, redacting credentials. Check whether application overrides change DNS, routing, transport, or selector state. A subscription accepted by a GUI is not proof that all fields were applied, and a standalone sing-box check does not validate another core's behavior.
@@ -24,6 +42,16 @@ Compare intended versus effective settings before attributing the failure to TSP
 | Calls or games fail | Check UDP and STUN requirements, MTU, and per-service rules. Do not solve this by globally blocking STUN or QUIC. |
 
 Use short debug captures, redact credentials, and compare one variable at a time. First run `sing-box version` and `sing-box check -c config.json`; these validate construction, not censorship or reachability. Test real service traffic after schema checks.
+
+### Ping Works, TCP Times Out: Test the Actual Path
+
+1. Test the configured service port, not just ICMP, from the affected network and a control network. On Windows use `Test-NetConnection <server-ip> -Port <server-port>` and inspect `TcpTestSucceeded`, not `PingSucceeded`. Test only endpoints/ports you control or have permission to probe.
+2. With operator access, capture the same timestamped attempt on both sides. For example, on a Linux client/router: `sudo tcpdump -ni any 'host <server-ip> and tcp port <server-port>'`; on the server filter by the client's observed public/NAT IP instead. Redact captures before sharing.
+3. Repeated outgoing SYNs absent from the server capture indicate loss on the forward path. SYNs arriving with SYN-ACKs sent but absent at the client indicate return-path loss. Account for NAT, capture placement, host/cloud firewalls, and routing before assigning blame to TSPU. Missing `mtr` hop replies do not locate a filter by themselves.
+4. A foreign-to-RU SYN arriving is not a successful reverse connection: the RU SYN-ACK can still be dropped when its destination is the blocked foreign IP. Verify a completed handshake and application data in both directions.
+5. UDP silence alone is inconclusive: use a service expected to reply and paired captures. A surviving old connection does not establish that new connections work.
+
+If evidence indicates destination-IP filtering before TLS, changing VLESS flow, SNI, fingerprint, DNS, FakeIP, mux, or fragmentation cannot restore that IP path. Use a verified reachable entry/relay supplied by the operator or another access network. If TCP/TLS succeeds but data stalls, compare small and sustained transfers; do not conflate that with a pre-handshake IP drop.
 
 ## Allowlist-Only Access (Белые списки)
 
@@ -50,11 +78,36 @@ Only listed or explicitly added domains use the proxy. Local DNS and unlisted tr
 
 The `blocked-services` selector can deliberately select direct, but DNS does not follow that selection. Full direct exceptions require paired DNS/route rules. If policy changes appear ineffective, reconnect and flush relevant application DNS caches before repeating the test.
 
+## Entry/Exit Separation and Fail-Closed Chains
+
+**Threat model:** a destination or application can observe its public source IP. If proxy entry and egress use the same address, that reveals the entry to the destination. An app can contact its own endpoint; blocking `ipify`/`2ip`, Russian domains, STUN, or selected app packages does not guarantee concealment. This does not prove that a particular app reports addresses or caused a block. Split routing can reduce which traffic sees the proxy exit, not guarantee secrecy.
+
+The preferred operational arrangement is an operator-managed entry A forwarding user traffic through a distinct exit B. Clients keep the supplied A profile; no client DNS switch can create a second server egress IP. The operator must prevent direct egress from A when B fails and handle both address families. A second IP on the same host does not protect against a whole-subnet block. WARP is an operator-side option with reachability and service dependencies, not a universal client switch.
+
+When the user supplies **two compatible proxy profiles** and requests a client-managed `client -> A -> B -> destination` chain:
+
+- Keep A's real reachable server address/port and bootstrap independent of the chain. Keep B's real server address/port and credentials; add `"detour": "entry-A"` to **B**, tagged `exit-B`. A must be able to reach B. Do not put the detour on A, make a cycle, or treat ShadowTLS's special wrapper address as a general proxy-chain recipe.
+- Route protected traffic to `exit-B`, or a selector whose members are complete exit-via-entry chains. The protected DNS transport and rule-set HTTP client's detour must select the same complete chain. Bootstrap A separately; if B uses a hostname, check resolution through the upstream path without introducing a resolver dependency on B itself.
+- For this threat model, keep `entry-A` alone and `direct` out of protected selectors/URLTest members and fallbacks. Remove the template's deliberate `blocked-services -> direct` option for that protected policy, or explicitly disclose it as an escape hatch that breaks the policy. This is a requested variant, not a change to the default template.
+- Failure of B must fail the protected connection, not retry through A alone or direct. `route.final: "direct"` for unmatched traffic is a routing decision, not automatic failover after an outbound fails.
+- Verify normal traffic and remote DNS use B's egress; with B deliberately unavailable, verify protected connections fail and never emerge from A or the device directly. Test TCP, supported UDP, and IPv6 if enabled. Schema validation and a successful 204 probe cannot establish these invariants.
+
+This hides the entry from destinations for traffic using the chain, not from the local ISP observing connections to A, the entry operator, or an application able to inspect local configuration. Do not claim anonymity or immunity to active probing. Entry/exit topology is distinct from the choice of VLESS transport.
+
+## Local Proxy Exposure
+
+An unauthenticated SOCKS/HTTP listener on `127.0.0.1` is not access control against other local applications. A TUN-excluded application may explicitly use that listener; its traffic then enters the proxy inbound, so do not assume the TUN exclusion still applies.
+
+For TUN-only use, do not add an unnecessary mixed/socks/http listener; check GUI-created listeners as well. If a listener is needed, bind it to loopback and configure nonempty `users` with unique credentials where the consuming application supports proxy authentication. Verify authentication works in the actual GUI/browser/system-proxy path; system proxy settings do not guarantee credential propagation. See `network-modes.md`. Do not copy Happ subscription headers as sing-box JSON or claim a localhost password defeats privileged local software.
+
 ## Authoritative Compatibility Sources
 
 - [1.14.4 source](https://github.com/SagerNet/sing-box/tree/v1.14.4)
 - [TLS options](https://sing-box.sagernet.org/configuration/shared/tls/)
 - [Route actions](https://sing-box.sagernet.org/configuration/route/rule_action/)
 - [DNS](https://sing-box.sagernet.org/configuration/dns/)
+- [1.14.4 V2Ray transports](https://github.com/SagerNet/sing-box/blob/v1.14.4/docs/configuration/shared/v2ray-transport.md)
+- [1.14.4 dial fields / detour](https://github.com/SagerNet/sing-box/blob/v1.14.4/docs/configuration/shared/dial.md)
+- [1.14.4 mixed inbound authentication](https://github.com/SagerNet/sing-box/blob/v1.14.4/docs/configuration/inbound/mixed.md)
 
 The website is rolling; reject features introduced after 1.14.4.

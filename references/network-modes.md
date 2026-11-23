@@ -63,6 +63,12 @@ A system proxy configuration uses a mixed inbound, without a TUN inbound, DNS hi
 
 The snippet is a structural fragment: retain the RealIP template's DNS server definitions, actual proxy outbounds, selectors, and rule-sets. Remove the TUN inbound and its catch-all DNS hijack rules when adapting it. For manual proxy use, omit `set_system_proxy` or set it to `false`; configure the application to use the listening address and port. Do not carry FakeIP into a mode without TUN interception.
 
+### Local Listener Access Control
+
+The examples above and below have no authentication. Loopback prevents LAN exposure, not access by other local apps; an application excluded from TUN may still connect explicitly to this proxy. Prefer TUN-only without extra listeners when they are unnecessary. Inspect GUI-created local proxies separately from the JSON.
+
+When local-app isolation is required and the consuming application supports authentication, add a nonempty `users` array to the mixed/socks/http inbound, with `username` and a unique `password`; configure those credentials in the consuming application. [Mixed inbound documentation](https://sing-box.sagernet.org/configuration/inbound/mixed/) specifies that an empty user list requires no authentication. Do not insert example/shared passwords in a final configuration. Verify the actual application's proxy-auth support before combining this with system proxy or `platform.http_proxy`; the OS proxy setting does not automatically provision credentials. Authentication is not protection against privileged local software.
+
 ## Optional `platform.http_proxy`
 
 Not needed by default. Add it only in these scenarios:

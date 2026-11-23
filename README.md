@@ -26,7 +26,14 @@ Both templates use typed DNS servers, optimistic/persistent DNS caching, explici
 
 The built-in policy targets **Russia: proxy listed blocked domains; connect directly otherwise**. It uses Runet Freedom's community `ru-blocked` domain list, ad blocking, and a `blocked-services` selector. Unmatched traffic and DNS remain direct/local; this is not a full-tunnel policy. Rule-sets download through the proxy with six-hour refreshes. RealIP uses proxied DoH for selected domains; optional FakeIP applies only to their address queries.
 
-See [Russia DPI diagnostics](references/russia-dpi.md) for handshake failures, transfer stalls, UDP restrictions, and client/server checks, using official documentation and reproducible network tests.
+See [Russia DPI diagnostics](references/russia-dpi.md) for handshake failures, transfer stalls, UDP restrictions, and client/server checks. The November 23 update incorporates the [November 7 architecture report](https://habr.com/ru/articles/1103460/) and [November 9 packet-path investigation](https://habr.com/ru/articles/1105268/) as observations, not universal guarantees:
+
+- Distinguish IP drops from TLS/transport failures; a successful ping is not proof of TCP/UDP connectivity.
+- Choose supported [VLESS alternatives to XHTTP](references/node-conversion.md#choosing-a-vless-alternative-to-xhttp): gRPC+TLS for an HTTP/2 trial, or matching HTTP/H2, WS, and HTTPUpgrade profiles. All require server support; no drop-in XHTTP conversion exists.
+- Explain entry/exit separation, fail-closed client chains, and why split routing or blocking IP-check sites cannot guarantee entry secrecy.
+- Document local SOCKS/HTTP authentication limits and avoid unverified SNI, fingerprint, mux, or fragmentation presets.
+
+The selective routing templates remain unchanged. November transport guidance is checked against the pinned 1.14.4 references; no live ISP bypass or proxy-server reachability is claimed.
 
 Templates contain **placeholder node parameters**. Replace these and update selector/URLTest references before using a configuration.
 

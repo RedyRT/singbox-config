@@ -446,9 +446,11 @@ App → sing-box → ShadowTLS (outer) → Shadowsocks (inner) → destination
 
 For this ShadowTLS wrapping pattern, the outer outbound determines the physical server connection. Do not generalize that to all detours: a normal proxy-to-proxy chain still needs the inner proxy's actual server address and port, which the upstream proxy connects to.
 
+For a normal two-proxy chain `client -> entry-A -> exit-B -> destination`, B keeps its real server address/port and sets `"detour": "entry-A"`; protected routes select B. Entry/exit separation, DNS/download paths, and fail-closed selection are covered in [Russia DPI diagnostics](russia-dpi.md#entryexit-separation-and-fail-closed-chains). The ShadowTLS example above is wrapping, not two distinct public egress hosts.
+
 ## 12. Multiplexing (Multiplex / Mux)
 
-Combines multiple connections into a single underlying TCP connection to reduce handshake overhead, with optional traffic padding.
+Combines multiple logical connections over underlying connections when both ends support the same sing-box multiplex protocol. It is not Xray `mux`/`xmux` and does not turn VLESS into XHTTP. Leave it disabled unless the supplied server profile supports it and a measured need justifies enabling it.
 
 ```json
 {
@@ -457,17 +459,18 @@ Combines multiple connections into a single underlying TCP connection to reduce 
     "enabled": true,
     "protocol": "h2mux",
     "max_connections": 4,
-    "min_streams": 4,
-    "padding": true,
-    "brutal": { "enabled": true, "up_mbps": 50, "down_mbps": 100 }
+    "min_streams": 4
   }
 }
 ```
 
-- `h2mux` is recommended (HTTP/2 multiplexing); `smux` has better compatibility but lower efficiency
-- `brutal` enables TCP Brutal congestion control (the server must also support and enable brutal)
-- `padding: true` adds random bytes to resist traffic analysis
-- **Note:** The server must also enable multiplex; otherwise, connections fail
+- Illustrative fragment, not an anti-DPI preset or complete outbound. Use operator-approved values; `h2mux` is the documented default protocol, not a claim that this makes traffic browser HTTP/2.
+- `max_connections` and `min_streams` conflict with `max_streams`; do not copy Xray connection lifetime/request-count ranges into these fields.
+- `padding` requires compatible server support. Extra padding is not proof of resistance to traffic analysis.
+- `brutal` requires matching server support and bandwidth settings; it is not a default censorship workaround.
+- The server must also support multiplex; otherwise connections fail. Do not add mux to a Vision profile as an assumed compatible optimization.
+- During diagnosis, avoid repeated bulk URLTests/reconnect storms; use a manual selector or pause automated probes for a controlled comparison, then test real traffic. Reports of a fixed handshake threshold do not justify universal pool sizes or timers.
+- Source: [1.14.4 multiplex options](https://github.com/SagerNet/sing-box/blob/v1.14.4/docs/configuration/shared/multiplex.md).
 
 ## 13. TLS Fragmentation (Anti-DPI)
 
